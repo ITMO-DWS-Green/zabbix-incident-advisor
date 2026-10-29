@@ -1,0 +1,27 @@
+{
+	"manifest_version": 2.0,
+	"id": "incident-advisor",
+	"name": "Incident advisor",
+	"version": "0.1.0",
+	"namespace": "IncidentAdvisor",
+	"author": "ITMO-DWS-Green",
+	"description": "Разбор инцидентов: с какого сервиса началось и почему.",
+	"actions": {
+		"incidentadvisor.view": {
+			"class": "IncidentsView",
+			"view": "incidentadvisor.view"
+		},
+		"incidentadvisor.api.get": {
+			"class": "ApiGet",
+			"layout": "layout.json"
+		},
+		"incidentadvisor.api.post": {
+			"class": "ApiPost",
+			"layout": "layout.json"
+		}
+	},
+	"assets": {
+		"css": ["incident-advisor.css"],
+		"js": ["incident-advisor.js"]
+	}
+}

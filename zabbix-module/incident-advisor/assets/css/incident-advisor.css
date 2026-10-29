@@ -1,0 +1,29 @@
+/* Нейтральные стили: подходят и к светлой, и к тёмной теме Zabbix — цвета наследуются. */
+#incident-advisor { padding: 8px 0; }
+.ia-status { margin-bottom: 12px; opacity: .75; }
+.ia-error { color: #e45959; opacity: 1; }
+.ia-muted { opacity: .7; font-size: 12px; }
+.ia-layout { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px; align-items: start; }
+.ia-list { display: flex; flex-direction: column; gap: 6px; max-height: 80vh; overflow-y: auto; }
+.ia-item { text-align: left; padding: 8px 10px; border: 1px solid rgba(128, 128, 128, .35); border-radius: 4px;
+	background: transparent; color: inherit; cursor: pointer; display: grid; gap: 3px; font: inherit; }
+.ia-item:hover, .ia-selected { border-color: #4796c4; }
+.ia-item-title { font-weight: bold; display: flex; gap: 6px; align-items: baseline; }
+.ia-sev { font-size: 11px; padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(128, 128, 128, .5); font-weight: normal; white-space: nowrap; }
+.ia-sev-4, .ia-sev-5 { border-color: #e45959; }
+.ia-sev-3 { border-color: #f24f1d; }
+.ia-sev-2 { border-color: #ffa059; }
+.ia-card { border: 1px solid rgba(128, 128, 128, .35); border-radius: 4px; padding: 12px 16px; min-height: 200px; }
+.ia-card h3 { margin: 0 0 4px; }
+.ia-summary { font-size: 14px; margin: 12px 0; }
+.ia-section { margin: 14px 0; }
+.ia-section h4 { margin: 0 0 6px; }
+.ia-pre { white-space: pre-wrap; font-size: 12px; }
+.ia-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 16px; }
+.ia-input { min-width: 160px; }
+.ia-timeline { width: 100%; max-width: 640px; height: auto; }
+.ia-tl-row { stroke: rgba(128, 128, 128, .35); }
+.ia-tl-start { stroke: #e45959; stroke-dasharray: 4 3; }
+.ia-tl-dot { fill: #4796c4; }
+.ia-tl-label { fill: currentColor; font-size: 11px; }
+@media (max-width: 900px) { .ia-layout { grid-template-columns: 1fr; } }

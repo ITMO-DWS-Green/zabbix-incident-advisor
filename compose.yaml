@@ -1,0 +1,186 @@
+# Всё для разработки incident-advisor одной командой:
+#   docker compose up -d --build                   Zabbix + сервис + модуль
+#   docker compose --profile stand up -d --build   + стенд test-server со сбоями
+#   docker compose --profile ollama up -d          + локальная LLM (ADVISOR_LLM_PROVIDER=openai)
+#
+# Zabbix:  http://localhost:8070  (Admin / zabbix) → Monitoring → Incident advisor
+# Сервис:  http://localhost:8095  (заголовок X-Advisor-Token: dev-ui-token)
+# Стенд:   http://localhost:8090  (панель сбоев test-server)
+
+name: incident-advisor
+
+x-zabbix-db: &zabbix-db
+  DB_SERVER_HOST: zabbix-db
+  POSTGRES_USER: zabbix
+  POSTGRES_PASSWORD: zabbix
+  POSTGRES_DB: zabbix
+
+x-stand: &stand
+  profiles: [stand]
+  build: https://github.com/ITMO-DWS-Green/test-server.git#main
+  image: incident-advisor/test-server:local
+  restart: unless-stopped
+  mem_limit: 384m
+
+x-stand-env: &stand-env
+  TESTSERVER_COLLECTOR_URL: http://advisor:8080   # разметка сбоев → сервис (оценка точности)
+
+services:
+  # ---------------- Zabbix ----------------
+  zabbix-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      POSTGRES_DB: zabbix
+    volumes: [zabbix-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix -d zabbix"]
+      interval: 5s
+      retries: 30
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    restart: unless-stopped
+    environment:
+      <<: *zabbix-db
+      ZBX_STARTCONNECTORS: 2          # коннекторы по умолчанию выключены
+      ZBX_CACHEUPDATEFREQUENCY: 10    # новые триггеры и коннекторы подхватываются за 10 с, а не за минуту
+    ports: ["10051:10051"]
+    depends_on:
+      zabbix-db:
+        condition: service_healthy
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    restart: unless-stopped
+    environment:
+      <<: *zabbix-db
+      ZBX_SERVER_HOST: zabbix-server
+      PHP_TZ: Europe/Moscow
+    ports: ["8070:8080"]
+    volumes:
+      - ./zabbix-module/incident-advisor:/usr/share/zabbix/modules/incident-advisor:ro
+    depends_on: [zabbix-server]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
+      interval: 10s
+      retries: 30
+
+  zabbix-agent2:
+    image: zabbix/zabbix-agent2:alpine-7.0-latest
+    restart: unless-stopped
+    environment:
+      ZBX_HOSTNAME: Zabbix server
+      ZBX_SERVER_HOST: zabbix-server
+    depends_on: [zabbix-server]
+
+  # Настройка Zabbix через API: токен сервиса, коннекторы, модуль, хосты стенда. Один раз и завершается.
+  setup:
+    image: python:3.12-alpine
+    restart: "no"
+    environment:
+      ZABBIX_URL: http://zabbix-web:8080
+      ADVISOR_URL: http://advisor:8080
+      ADVISOR_CONNECTOR_TOKEN: ${ADVISOR_CONNECTOR_TOKEN:-dev-connector-token}
+      TOKEN_FILE: /secrets/zabbix-api-token
+    volumes:
+      - ./infra/setup:/setup:ro
+      - secrets:/secrets
+    command: ["python", "-u", "/setup/setup.py"]
+    depends_on:
+      zabbix-web:
+        condition: service_healthy
+
+  # ---------------- Расширение ----------------
+  advisor-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: advisor
+      POSTGRES_PASSWORD: advisor
+      POSTGRES_DB: advisor
+    ports: ["5433:5432"]
+    volumes: [advisor-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U advisor -d advisor"]
+      interval: 5s
+      retries: 30
+
+  advisor:
+    build: ./service
+    restart: unless-stopped
+    environment:
+      ADVISOR_DB_URL: jdbc:postgresql://advisor-db:5432/advisor
+      ZABBIX_URL: http://zabbix-web:8080
+      ZABBIX_API_TOKEN_FILE: /secrets/zabbix-api-token
+      ADVISOR_UI_TOKEN: ${ADVISOR_UI_TOKEN:-dev-ui-token}
+      ADVISOR_CONNECTOR_TOKEN: ${ADVISOR_CONNECTOR_TOKEN:-dev-connector-token}
+      ADVISOR_ANALYSIS_DELAY: ${ADVISOR_ANALYSIS_DELAY:-60s}
+      ADVISOR_LLM_PROVIDER: ${ADVISOR_LLM_PROVIDER:-stub}
+      ADVISOR_LLM_BASE_URL: ${ADVISOR_LLM_BASE_URL:-http://ollama:11434/v1}
+      ADVISOR_LLM_MODEL: ${ADVISOR_LLM_MODEL:-qwen2.5:3b}
+      ADVISOR_LLM_API_KEY: ${ADVISOR_LLM_API_KEY:-}
+    ports: ["8095:8080"]
+    volumes:
+      - secrets:/secrets:ro
+    depends_on:
+      advisor-db:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8080' || exit 1"]
+      interval: 5s
+      retries: 40
+
+  # ---------------- Стенд test-server (profile stand) ----------------
+  gateway:
+    <<: *stand
+    ports: ["8090:8080"]
+    environment:
+      <<: *stand-env
+      TESTSERVER_SERVICENAME: gateway
+      TESTSERVER_DOWNSTREAM: orders
+      TESTSERVER_TRAFFIC_RPS: ${TRAFFIC_RPS:-10}
+
+  orders:
+    <<: *stand
+    environment:
+      <<: *stand-env
+      TESTSERVER_SERVICENAME: orders
+      TESTSERVER_DOWNSTREAM: payments,database
+
+  payments:
+    <<: *stand
+    environment:
+      <<: *stand-env
+      TESTSERVER_SERVICENAME: payments
+      TESTSERVER_DOWNSTREAM: database
+
+  database:
+    <<: *stand
+    environment:
+      <<: *stand-env
+      TESTSERVER_SERVICENAME: database
+
+  # ---------------- Локальная LLM (profile ollama) ----------------
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:0.6.8
+    restart: unless-stopped
+    volumes: [ollama:/root/.ollama]
+
+  ollama-pull:
+    profiles: [ollama]
+    image: curlimages/curl:8.13.0
+    restart: "no"
+    command: ["sh", "-c", "sleep 5 && curl -sf http://ollama:11434/api/pull -d '{\"name\":\"${ADVISOR_LLM_MODEL:-qwen2.5:3b}\"}'"]
+    depends_on: [ollama]
+
+volumes:
+  zabbix-db:
+  advisor-db:
+  secrets:
+  ollama:
