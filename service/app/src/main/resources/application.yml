@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: incident-advisor
+  datasource:
+    url: ${ADVISOR_DB_URL:jdbc:postgresql://localhost:5433/advisor}
+    username: ${ADVISOR_DB_USER:advisor}
+    password: ${ADVISOR_DB_PASSWORD:advisor}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# Все параметры можно задать переменными окружения: ADVISOR_ANALYSIS_DELAY=30s, ADVISOR_LLM_PROVIDER=openai и т. д.
+advisor:
+  zabbix:
+    url: ${ZABBIX_URL:http://localhost:8070}
+    token: ${ZABBIX_API_TOKEN:}
+    token-file: ${ZABBIX_API_TOKEN_FILE:/secrets/zabbix-api-token}
+    comment: true
+  security:
+    ui-token: ${ADVISOR_UI_TOKEN:dev-ui-token}
+    connector-token: ${ADVISOR_CONNECTOR_TOKEN:dev-connector-token}
+  analysis:
+    delay: 60s
+    lookback: 15m
+    graph-depth: 2
+    max-items-per-host: 50
+    history-limit: 20000
+    threads: 2
+  llm:
+    provider: stub
+    base-url: http://ollama:11434/v1
+    api-key: ""
+    model: qwen2.5:3b
+    timeout: 60s
