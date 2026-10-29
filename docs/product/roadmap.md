@@ -23,41 +23,45 @@ gantt
   Карточка, отчёт, демо :s4, 2026-12-19, 2027-01-22
 ```
 
+Приоритеты: **P1** — без этого спринт не закрыть, **P2** — важно, делаем после P1, **P3** — можно сдвинуть в следующий спринт. Порядок в таблицах — порядок, в котором берём задачи; он же записан в описании milestone.
+
 ## Спринт 2 · до 27.11 · подготовка и сквозной путь
 Цель: требования и архитектура согласованы, проблема в Zabbix доходит до Telegram через наш сервис, пусть пока с простым разбором.
 
 Сделано в каркасе: стенд одной командой, клиент API, приём коннектора, карта связей по тегам, базовый разбор и комментарий в Zabbix, БД и приём разметки, модуль интерфейса, карточка с таймлайном ([#44](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/44)–[#52](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/52)).
 
-| Задача | Что |
-|---|---|
-| [#1](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/1), [#2](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/2), [#38](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/38) | Требования, критерии приёмки, НФТ — пересогласовать с заказчиком |
-| [#3](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/3) | Ревью архитектуры каркаса всей командой |
-| [#4](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/4) | Тест-план для TDD |
-| [#5](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/5) | Выбор LLM и правила работы с данными |
-| [#6](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/6) | Логи test-server в Zabbix |
-| [#39](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/39) | test-server отправляет в сервис только разметку |
-| [#40](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/40) | Объединение проблем в инцидент (FR-04) |
-| [#41](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/41) | Догон пропущенных событий |
-| [#17](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/17) | Оповещение с разбором в Telegram (FR-08, идея 9) |
+| # | Задача | Приоритет | Что |
+|---|---|---|---|
+| 1 | [#1](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/1) | P1 | Пересогласовать требования с заказчиком |
+| 2 | [#3](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/3) | P1 | Ревью архитектуры каркаса всей командой |
+| 3 | [#6](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/6) | P1 | Логи test-server в Zabbix |
+| 4 | [#2](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/2) | P1 | Критерии приёмки и метрики успеха |
+| 5 | [#4](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/4) | P1 | Тест-план для TDD |
+| 6 | [#17](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/17) | P2 | Оповещение с разбором в Telegram (FR-08, идея 9) |
+| 7 | [#40](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/40) | P2 | Объединение проблем в инцидент (FR-04) |
+| 8 | [#5](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/5) | P2 | Выбор LLM и правила работы с данными |
+| 9 | [#38](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/38) | P3 | Нефункциональные требования |
+| 10 | [#41](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/41) | P3 | Догон пропущенных событий |
+| 11 | [#39](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/39) | P3 | test-server отправляет в сервис только разметку |
 
 ## Спринт 3 · до 18.12 · настоящий разбор
-| Задача | Что |
-|---|---|
-| [#8](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/8) | Отклонения метрик (FR-05, идея 1) |
-| [#9](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/9) | Ранжирование подозреваемых с учётом карты связей (FR-05, идея 1) |
-| [#10](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/10) | Доказательства из логов (FR-06, идея 2) |
-| [#11](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/11) | Объяснение и полный разбор в комментарии (FR-07, идея 3) |
-| [#12](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/12) | Маскирование и журнал LLM (идея 4) |
-| [#15](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/15) | Точность и сравнение с базовым подходом (FR-09, FR-10, идея 7) |
+| # | Задача | Приоритет | Что |
+|---|---|---|---|
+| 1 | [#8](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/8) | P1 | Отклонения метрик (FR-05, идея 1) |
+| 2 | [#9](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/9) | P1 | Ранжирование подозреваемых с учётом карты связей (FR-05, идея 1) |
+| 3 | [#15](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/15) | P1 | Точность и сравнение с базовым подходом (FR-09, FR-10, идея 7) |
+| 4 | [#10](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/10) | P1 | Доказательства из логов (FR-06, идея 2) |
+| 5 | [#11](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/11) | P2 | Объяснение и полный разбор в комментарии (FR-07, идея 3) |
+| 6 | [#12](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/12) | P3 | Маскирование и журнал LLM (идея 4) |
 
 ## Спринт 4 · до 22.01 · интерфейс и защита
-| Задача | Что |
-|---|---|
-| [#13](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/13) | Карточка: графики, ссылки, логи (FR-11, идея 5) |
-| [#14](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/14) | Карта связей не только из тегов (идея 6) |
-| [#42](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/42) | Страница точности и прогоны всех плейбуков (FR-12) |
-| [#43](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/43) | README и документация к защите |
-| [#7](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/7) | Демо и презентация |
+| # | Задача | Приоритет | Что |
+|---|---|---|---|
+| 1 | [#42](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/42) | P1 | Страница точности и прогоны всех плейбуков (FR-12) |
+| 2 | [#7](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/7) | P1 | Демо и презентация |
+| 3 | [#43](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/43) | P1 | README и документация к защите |
+| 4 | [#13](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/13) | P2 | Карточка: графики, ссылки, логи (FR-11, идея 5) |
+| 5 | [#14](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/14) | P3 | Карта связей не только из тегов (идея 6) |
 
 ## Если успеем — по порядку (метка `очередь 2`)
 | Идея | Задача | Требование |
