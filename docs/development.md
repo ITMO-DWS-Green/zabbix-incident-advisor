@@ -65,4 +65,4 @@ ExplanationWriter.write(...)
 
 Для боевого Zabbix: отдельный пользователь с правами чтения на нужные группы и записи триггеров, свой API-токен, свои секреты `ADVISOR_UI_TOKEN` и `ADVISOR_CONNECTOR_TOKEN`, адрес сервиса в `zabbix-module/incident-advisor/config.php`.
 
-Точки расширения Zabbix и API в целом — [zabbix-extension.md](zabbix-extension.md).
+Точки расширения Zabbix и API в целом — [architecture/zabbix-integration.md](architecture/zabbix-integration.md), обзор — [docs/README.md](README.md).
