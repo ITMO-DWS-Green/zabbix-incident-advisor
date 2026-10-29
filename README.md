@@ -65,7 +65,7 @@ flowchart LR
 | `zabbix-module` | JS-страница | 5. Карточка инцидента | список, карточка, таймлайн, оценка | |
 
 Как взять задачу:
-1. Ветка `feature/<номер>-<кратко>`.
+1. Ветка `feature/<номер>-<кратко>` (правила — в [docs/process/workflow.md](docs/process/workflow.md)).
 2. Пишете класс в своём модуле, реализующий его интерфейс. Заглушку можно оставить рядом.
 3. Переключаете реализацию **одной строкой** в `service/app/.../config/BusinessLogicConfig.java`.
 4. Тестируете модуль без Spring — на готовых данных, как в `AnalysisServiceTest`.
@@ -77,6 +77,10 @@ flowchart LR
 - `LlmClient` — вызвать модель. Маскирование и журнал уже встроены: передайте в `sensitive` имена хостов, и они не уйдут наружу.
 
 Подробнее о модели данных и правилах — в [docs/development.md](docs/development.md).
+
+## База знаний
+
+Продукт, требования, архитектура, решения и процесс — в [docs/](docs/README.md). Задачи — в [Issues](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues), спринты — milestones, план — в [дорожной карте](docs/product/roadmap.md).
 
 ## Структура
 
@@ -90,7 +94,7 @@ service/                     Java 21, Spring Boot 3.5, Gradle
   app/                       конвейер, приём коннектора, БД, REST — готов
 zabbix-module/incident-advisor/  модуль интерфейса Zabbix: JS + тонкий PHP
 infra/setup/                 настройка Zabbix через API и сквозной тест
-docs/                        разработка, точки расширения Zabbix
+docs/                        база знаний: продукт, требования, архитектура, процесс
 ```
 
 ## Настройки сервиса
