@@ -1,8 +1,9 @@
 """Оповещения GitHub → Telegram во все чаты, где есть бот.
 
 У Bot API нет метода «список чатов бота», поэтому список копится сам:
-- каждый запуск читает последние обновления бота (getUpdates, без подтверждения —
-  Telegram хранит их 24 часа) и добавляет чаты, куда бота добавили или где ему писали;
+- обновления бота (getUpdates) читает только workflow «Встречи» раз в 5 минут, по одному
+  запуску за раз; прочитанные подтверждаются, поэтому команды обрабатываются ровно один раз;
+- он добавляет чаты, куда бота добавили или где ему писали;
 - удаляет чаты, откуда бота убрали или куда отправка вернула 403;
 - список хранится в кэше Actions между запусками (файл chats.json);
 - TELEGRAM_CHAT_ID (необязательно) — чаты, которые получают оповещения всегда:
@@ -13,7 +14,7 @@
   /join     — тегать меня за 15 минут до встреч (администраторов чата бот тегает сам)
   /leave    — не тегать меня
   /off      — не писать в этот чат вообще; /on — снова писать
-Расписание раз в 6 часов в workflow подхватывает новые чаты и не даёт кэшу протухнуть.
+Оповещения о событиях GitHub (этот скрипт) список только читают.
 """
 import html
 import json
@@ -101,7 +102,8 @@ def command(chat, msg, fresh):
 
 
 def discover(chats):
-    res = tg("getUpdates", allowed_updates=json.dumps(["my_chat_member", "message", "channel_post"]))
+    res = tg("getUpdates", offset=META["last_update"] + 1 if META["last_update"] else None,
+             allowed_updates=json.dumps(["my_chat_member", "message", "channel_post"]))
     if not res.get("ok"):
         print("getUpdates:", res.get("description"))
         return
@@ -251,7 +253,6 @@ def main():
         print("::notice::Секрет TELEGRAM_BOT_TOKEN не задан — оповещение пропущено")
         return
     chats = load()
-    discover(chats)
     name = os.environ["GITHUB_EVENT_NAME"]
     text = None
     if name not in ("schedule", "workflow_dispatch"):
@@ -263,7 +264,6 @@ def main():
         print(f"Отправлено в {sent} из {len(to)} чатов")
     else:
         print("Нечего отправлять")
-    save(chats)
     print_chats(chats)
 
 

@@ -1,4 +1,4 @@
-# Напоминания о встречах (задачи с меткой «встреча») в Telegram за сутки, за час и за 15 минут с тегами.
+# Ведёт список чатов бота и его команды (/join, /github, …) и напоминает о встречах (задачи с меткой «встреча») в Telegram за сутки, за час и за 15 минут с тегами.
 name: Встречи
 
 on:
@@ -10,9 +10,12 @@ permissions:
   contents: read
   actions: write   # запись кэша со списком чатов и отправленными напоминаниями
   issues: read
+  pull-requests: read
 
+# один запуск за раз: команды бота обрабатываются ровно один раз
 concurrency:
-  group: meetings
+  group: telegram-bot
+  cancel-in-progress: false
 
 jobs:
   remind:
@@ -39,6 +42,8 @@ jobs:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
         run: python3 .github/scripts/meeting_reminders.py
       - name: Запомнить отправленные
         if: always() && hashFiles('sent.json') != ''

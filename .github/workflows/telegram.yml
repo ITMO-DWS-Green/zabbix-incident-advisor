@@ -1,6 +1,6 @@
 # Оповещения в Telegram во все чаты, где есть бот: задачи, комментарии, PR, ревью, упавший CI.
 # Секреты: TELEGRAM_BOT_TOKEN — обязательно; TELEGRAM_CHAT_ID — необязательно, чаты «всегда» через запятую.
-# Новый чат: добавьте туда бота — он попадёт в рассылку при следующем событии или в течение 6 часов.
+# Список чатов и команды бота ведёт workflow «Встречи» (раз в 5 минут); здесь список только читается.
 name: Telegram
 
 on:
@@ -15,13 +15,9 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  schedule:
-    - cron: "17 */6 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write   # запись кэша со списком чатов и отправленными напоминаниями
 
 jobs:
   notify:
@@ -43,9 +39,3 @@ jobs:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python3 .github/scripts/telegram_notify.py
-      - name: Сохранить список чатов
-        if: always() && hashFiles('chats.json') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: chats.json
-          key: telegram-chats-${{ github.run_id }}
