@@ -6,7 +6,8 @@
   каждые 2 недели по пятницам 16:00 с 07.11.2026 · 05.11.2026 18:00
   27.11.2026 (без времени — встреча на весь день, напомним накануне в 12:00 и в 9:00)
 Время — Europe/Moscow. Напоминает за сутки, за час и за 15 минут (с тегами участников чата
-и списком «кто что делает» с доски — board_status.py); отправленные напоминания
+и списком «кто что делает» с доски — board_status.py);
+в начале встречи с полем «Протокол» — протокол (meeting_protocol.py); отправленные напоминания
 помнит в sent.json (кэш Actions), чтобы не повторяться. Закрыли задачу — напоминаний нет.
 """
 import datetime as dt
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(__file__))
 import telegram_notify as tg  # noqa: E402
 import board_status  # noqa: E402
+import meeting_protocol  # noqa: E402
 
 TZ = ZoneInfo("Europe/Moscow")
 SENT = os.environ.get("SENT_STORE", "sent.json")
@@ -161,6 +163,19 @@ def main():
         if not rule:
             print(f"#{issue['number']}: не понял расписание «{when}»")
             continue
+        protocol_for = field(issue.get("body"), "Протокол")
+        if protocol_for and rule["time"] is not None:
+            started = next_at(rule, now - dt.timedelta(minutes=30))
+            pkey = f"{issue['number']}@{started.isoformat()}:protocol" if started else None
+            if started and started <= now and pkey not in sent:
+                text = meeting_protocol.build(started, protocol_for, os.environ["GITHUB_TOKEN"])
+                n = sum(tg.send(t, tg.e(text), chats) for t in targets)
+                print(f"  протокол отправлен в {n} из {len(targets)} чатов")
+                try:
+                    meeting_protocol.comment(issue["number"], text, os.environ["GITHUB_TOKEN"])
+                except Exception as ex:  # noqa: BLE001 — протокол в чате важнее комментария
+                    print("  комментарий с протоколом:", ex)
+                sent[pkey] = now.isoformat()
         at = next_at(rule, now)
         print(f"#{issue['number']} {issue['title']}: следующая {at:%d.%m %H:%M}" if at else f"#{issue['number']}: встреч впереди нет")
         if not at:

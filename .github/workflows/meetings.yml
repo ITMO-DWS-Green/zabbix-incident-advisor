@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
   actions: write   # запись кэша со списком чатов и отправленными напоминаниями
-  issues: read
+  issues: write   # протокол встречи — комментарием в задаче
   pull-requests: read
 
 # один запуск за раз: команды бота обрабатываются ровно один раз
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: .github
       - name: Список чатов бота
         uses: actions/cache/restore@v4
         with:
