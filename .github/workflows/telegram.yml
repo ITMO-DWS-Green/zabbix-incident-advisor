@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: write   # запись кэша со списком чатов и отправленными напоминаниями
 
 jobs:
   notify:
