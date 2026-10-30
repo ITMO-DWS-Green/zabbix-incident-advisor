@@ -1,0 +1,53 @@
+# Напоминания о встречах (задачи с меткой «встреча») в Telegram за сутки, за час и за 15 минут с тегами.
+name: Встречи
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: meetings
+
+jobs:
+  remind:
+    name: Напоминания
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+      - name: Список чатов бота
+        uses: actions/cache/restore@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
+          restore-keys: telegram-chats-
+      - name: Отправленные напоминания
+        uses: actions/cache/restore@v4
+        with:
+          path: sent.json
+          key: meeting-sent-${{ github.run_id }}
+          restore-keys: meeting-sent-
+      - name: Напомнить
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/meeting_reminders.py
+      - name: Запомнить отправленные
+        if: always() && hashFiles('sent.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: sent.json
+          key: meeting-sent-${{ github.run_id }}
+      - name: Сохранить список чатов
+        if: always() && hashFiles('chats.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
