@@ -13,6 +13,8 @@
   /meetings — напоминания о встречах писать в эту тему
   /join     — тегать меня за 15 минут до встреч (администраторов чата бот тегает сам)
   /leave    — не тегать меня
+  /protocols — протоколы встреч писать в эту тему
+  /only github meetings protocols — в этот чат слать только перечисленное; /only — снова всё
   /off      — не писать в этот чат вообще; /on — снова писать
 Оповещения о событиях GitHub (этот скрипт) список только читают.
 """
@@ -63,7 +65,9 @@ def save(chats):
 
 
 COMMANDS = {"/github": ("thread", "Оповещения GitHub буду писать в эту тему."),
-            "/meetings": ("meetings_thread", "Напоминания о встречах буду писать в эту тему.")}
+            "/meetings": ("meetings_thread", "Напоминания о встречах буду писать в эту тему."),
+            "/protocols": ("protocols_thread", "Протоколы встреч буду писать в эту тему.")}
+KINDS = {"github": "оповещения GitHub", "meetings": "напоминания о встречах", "protocols": "протоколы встреч"}
 
 
 def command(chat, msg, fresh):
@@ -80,6 +84,17 @@ def command(chat, msg, fresh):
         else:
             members.pop(str(user["id"]), None)
             answer = f"{name}, больше не тегаю."
+        if fresh:
+            tg("sendMessage", chat_id=chat["id"], message_thread_id=thread, text=answer)
+        return
+    if word == "/only":
+        wanted = [w.lower() for w in msg["text"].split()[1:] if w.lower() in KINDS]
+        if wanted:
+            chat["only"] = wanted
+            answer = "В этот чат пишу только: " + ", ".join(KINDS[w] for w in wanted) + ". Вернуть всё — /only"
+        else:
+            chat.pop("only", None)
+            answer = "В этот чат снова пишу всё."
         if fresh:
             tg("sendMessage", chat_id=chat["id"], message_thread_id=thread, text=answer)
         return
@@ -223,9 +238,10 @@ def targets(chats, kind="github"):
     out = [s.strip() for s in STATIC.split(",") if s.strip()]
     static_ids = {t.partition(":")[0] for t in out}
     for key, c in chats.items():
-        if key in static_ids or c.get("off"):
+        if key in static_ids or c.get("off") or (c.get("only") and kind not in c["only"]):
             continue
-        thread = c.get("meetings_thread") if kind == "meetings" else None
+        thread = {"meetings": c.get("meetings_thread"),
+                  "protocols": c.get("protocols_thread") or c.get("meetings_thread")}.get(kind)
         thread = thread or c.get("thread")
         out.append(f"{key}:{thread}" if thread else key)
     return out
