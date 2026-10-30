@@ -29,6 +29,7 @@
 ## Процесс
 - [Команда](process/team.md) — роли, заказчик, куратор, где что лежит
 - [Как работаем](process/workflow.md) — ветки, задачи, спринты, Definition of Done
+- [Бот в Telegram](process/telegram-bot.md) — оповещения, встречи, команды, как устроен
 - [Протоколы встреч](meetings/README.md)
 
 ## Архив
