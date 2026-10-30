@@ -1,5 +1,6 @@
-# Оповещения в чат команды в Telegram: задачи, комментарии, PR, ревью, упавший CI.
-# Нужны секреты репозитория: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID; TELEGRAM_THREAD_ID — если чат с темами.
+# Оповещения в Telegram во все чаты, где есть бот: задачи, комментарии, PR, ревью, упавший CI.
+# Секреты: TELEGRAM_BOT_TOKEN — обязательно; TELEGRAM_CHAT_ID — необязательно, чаты «всегда» через запятую.
+# Новый чат: добавьте туда бота — он попадёт в рассылку при следующем событии или в течение 6 часов.
 name: Telegram
 
 on:
@@ -14,8 +15,12 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   notify:
@@ -23,61 +28,23 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request')
     steps:
-      - name: Отправить в Telegram
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+      - name: Список чатов бота
+        uses: actions/cache/restore@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
+          restore-keys: telegram-chats-
+      - name: Отправить
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          THREAD: ${{ secrets.TELEGRAM_THREAD_ID }}
-        run: |
-          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then
-            echo "::notice::Секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID не заданы — оповещение пропущено"; exit 0
-          fi
-          E="$GITHUB_EVENT_PATH"
-          j() { jq -r "$1 // empty" "$E"; }
-          esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
-          short() { tr '\r\n' '  ' | cut -c1-300 | esc; }
-          link() { printf '<a href="%s">%s</a>' "$1" "$(printf '%s' "$2" | esc)"; }
-          action=$(j .action); who=$(j .sender.login)
-          text=""
-          case "$GITHUB_EVENT_NAME" in
-            issues)
-              t=$(link "$(j .issue.html_url)" "#$(j .issue.number) $(j .issue.title)")
-              case "$action" in
-                opened)   text="🆕 Новая задача $t"$'\n'"от $who" ;;
-                closed)   if [ "$(j .issue.state_reason)" = "not_planned" ]; then text="🚫 Задача закрыта как неактуальная: $t"; else text="✅ Задача выполнена: $t"; fi; text="$text"$'\n'"закрыл $who" ;;
-                reopened) text="↩️ Задача снова открыта: $t"$'\n'"$who" ;;
-                assigned) a=$(j .assignee.login); if [ "$a" = "$who" ]; then text="👤 $a взял задачу $t"; else text="👤 $a назначен на задачу $t"$'\n'"назначил $who"; fi ;;
-              esac ;;
-            issue_comment)
-              if [ -n "$(j .issue.pull_request.url)" ]; then kind="PR"; else kind="задаче"; fi
-              t=$(link "$(j .comment.html_url)" "#$(j .issue.number) $(j .issue.title)")
-              text="💬 $who в $kind $t:"$'\n'"$(j .comment.body | short)" ;;
-            pull_request)
-              t=$(link "$(j .pull_request.html_url)" "PR #$(j .pull_request.number) $(j .pull_request.title)")
-              case "$action" in
-                opened)           if [ "$(j .pull_request.draft)" = "true" ]; then text="📝 Черновик $t от $who"; else text="🔀 Новый $t"$'\n'"от $who, нужно ревью"; fi ;;
-                ready_for_review) text="🔀 $t готов к ревью"$'\n'"от $who" ;;
-                review_requested) text="👀 $(j .requested_reviewer.login), посмотри $t"$'\n'"просит $who" ;;
-                reopened)         text="↩️ $t снова открыт" ;;
-                closed)           if [ "$(j .pull_request.merged)" = "true" ]; then text="🟣 $t слит в main"$'\n'"$who"; else text="✖️ $t закрыт без слияния"; fi ;;
-              esac ;;
-            pull_request_review)
-              t=$(link "$(j .review.html_url)" "PR #$(j .pull_request.number) $(j .pull_request.title)")
-              body=$(j .review.body | short)
-              case "$(j .review.state)" in
-                approved)          text="👍 $who одобрил $t" ;;
-                changes_requested) text="✋ $who просит доработать $t" ;;
-                commented)         [ -n "$body" ] && text="💬 $who оставил ревью к $t" ;;
-              esac
-              [ -n "$text" ] && [ -n "$body" ] && text="$text"$'\n'"$body" ;;
-            workflow_run)
-              pr=$(j '.workflow_run.pull_requests[0].number')
-              t=$(link "$(j .workflow_run.html_url)" "CI${pr:+ в PR #$pr} ($(j .workflow_run.head_branch))")
-              text="❌ Упал $t"$'\n'"автор $(j .workflow_run.actor.login)" ;;
-          esac
-          if [ -z "$text" ]; then echo "Нечего отправлять"; exit 0; fi
-          args=(-d chat_id="$CHAT" -d parse_mode=HTML -d disable_web_page_preview=true --data-urlencode text="$text")
-          [ -n "$THREAD" ] && args+=(-d message_thread_id="$THREAD")
-          code=$(curl -s -o resp.json -w '%{http_code}' -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" "${args[@]}")
-          cat resp.json; echo
-          test "$code" = "200"
+          CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python3 .github/scripts/telegram_notify.py
+      - name: Сохранить список чатов
+        if: always() && hashFiles('chats.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
