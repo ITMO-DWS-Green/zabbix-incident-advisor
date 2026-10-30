@@ -5,7 +5,8 @@
   каждый вторник 12:15 · пн, чт 19:00 · по будням 10:00 · каждый день 9:30
   каждые 2 недели по пятницам 16:00 с 07.11.2026 · 05.11.2026 18:00
   27.11.2026 (без времени — встреча на весь день, напомним накануне в 12:00 и в 9:00)
-Время — Europe/Moscow. Напоминает за сутки, за час и за 15 минут (с тегами участников чата); отправленные напоминания
+Время — Europe/Moscow. Напоминает за сутки, за час и за 15 минут (с тегами участников чата
+и списком «кто что делает» с доски — board_status.py); отправленные напоминания
 помнит в sent.json (кэш Actions), чтобы не повторяться. Закрыли задачу — напоминаний нет.
 """
 import datetime as dt
@@ -18,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(__file__))
 import telegram_notify as tg  # noqa: E402
+import board_status  # noqa: E402
 
 TZ = ZoneInfo("Europe/Moscow")
 SENT = os.environ.get("SENT_STORE", "sent.json")
@@ -166,7 +168,9 @@ def main():
         text, key = reminder(issue, at, now, sent, allday=rule["time"] is None)
         if text:
             if key.endswith(":soon"):
-                n = sum(tg.send(t, f"{text}\n{tg.mentions(t.partition(':')[0], chats)}".rstrip(), chats) for t in targets)
+                status = board_status.summary()
+                text = f"{text}\n\n{status}" if status else text
+                n = sum(tg.send(t, f"{text}\n\n{tg.mentions(t.partition(':')[0], chats)}".rstrip(), chats) for t in targets)
             else:
                 n = sum(tg.send(t, text, chats) for t in targets)
             print(f"  напоминание отправлено в {n} из {len(targets)} чатов")

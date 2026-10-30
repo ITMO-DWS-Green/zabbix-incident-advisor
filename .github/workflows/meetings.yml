@@ -10,6 +10,7 @@ permissions:
   contents: read
   actions: write   # запись кэша со списком чатов и отправленными напоминаниями
   issues: read
+  pull-requests: read
 
 concurrency:
   group: meetings
@@ -39,6 +40,8 @@ jobs:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
         run: python3 .github/scripts/meeting_reminders.py
       - name: Запомнить отправленные
         if: always() && hashFiles('sent.json') != ''
