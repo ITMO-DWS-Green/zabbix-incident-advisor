@@ -1,0 +1,33 @@
+name: Встреча
+description: Регулярная или разовая встреча — бот напомнит в Telegram за сутки и за час
+title: "Встреча: "
+labels: [встреча]
+body:
+  - type: input
+    id: when
+    attributes:
+      label: Когда
+      description: "Время московское. Примеры: «каждый вторник 12:15», «пн, чт 19:00», «каждые 2 недели по пятницам 16:00 с 07.11.2026», «05.11.2026 18:00»"
+      placeholder: каждый вторник 12:15
+    validations:
+      required: true
+  - type: input
+    id: duration
+    attributes:
+      label: Длительность
+      placeholder: 30 минут
+  - type: input
+    id: link
+    attributes:
+      label: Ссылка
+      placeholder: https://telemost.yandex.ru/j/…
+  - type: input
+    id: who
+    attributes:
+      label: Кто участвует
+      placeholder: вся команда, заказчик
+  - type: textarea
+    id: agenda
+    attributes:
+      label: Повестка
+      description: Обновляйте перед встречей — бот пришлёт её в напоминании

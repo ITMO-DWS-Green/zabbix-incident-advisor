@@ -7,6 +7,12 @@
 - список хранится в кэше Actions между запусками (файл chats.json);
 - TELEGRAM_CHAT_ID (необязательно) — чаты, которые получают оповещения всегда:
   через запятую, для темы в чате — id:тема.
+Команды в чате (в группе с темами — внутри нужной темы):
+  /github   — оповещения GitHub (и напоминания, если не задано иначе) писать в эту тему
+  /meetings — напоминания о встречах писать в эту тему
+  /join     — тегать меня за 15 минут до встреч (администраторов чата бот тегает сам)
+  /leave    — не тегать меня
+  /off      — не писать в этот чат вообще; /on — снова писать
 Расписание раз в 6 часов в workflow подхватывает новые чаты и не даёт кэшу протухнуть.
 """
 import html
@@ -35,12 +41,63 @@ def tg(method, **params):
             return {"ok": False, "error_code": e.code, "description": str(e)}
 
 
+META = {"last_update": 0}
+
+
 def load():
     try:
         with open(STORE) as f:
-            return {str(c["id"]): c for c in json.load(f)}
+            data = json.load(f)
     except (OSError, ValueError):
         return {}
+    if isinstance(data, dict):
+        META["last_update"] = data.get("last_update", 0)
+        data = data.get("chats", [])
+    return {str(c["id"]): c for c in data}
+
+
+def save(chats):
+    with open(STORE, "w") as f:
+        json.dump({"chats": list(chats.values()), "last_update": META["last_update"]}, f, ensure_ascii=False)
+
+
+COMMANDS = {"/github": ("thread", "Оповещения GitHub буду писать в эту тему."),
+            "/meetings": ("meetings_thread", "Напоминания о встречах буду писать в эту тему.")}
+
+
+def command(chat, msg, fresh):
+    """Команды /github, /meetings — тема для оповещений; /join, /leave — кого тегать перед встречей."""
+    word = (msg.get("text") or "").split()[0].split("@")[0].lower() if msg.get("text") else ""
+    thread = msg.get("message_thread_id") if msg.get("is_topic_message") else None
+    user = msg.get("from") or {}
+    if word in ("/join", "/leave") and user and not user.get("is_bot"):
+        members = chat.setdefault("members", {})
+        name = user.get("first_name") or user.get("username") or str(user["id"])
+        if word == "/join":
+            members[str(user["id"])] = {"name": name, "username": user.get("username")}
+            answer = f"{name}, буду тегать тебя за 15 минут до встреч."
+        else:
+            members.pop(str(user["id"]), None)
+            answer = f"{name}, больше не тегаю."
+        if fresh:
+            tg("sendMessage", chat_id=chat["id"], message_thread_id=thread, text=answer)
+        return
+    if word in ("/off", "/on"):
+        chat["off"] = word == "/off"
+        if fresh:
+            tg("sendMessage", chat_id=chat["id"], message_thread_id=thread,
+               text="Больше не пишу в этот чат. Вернуть — /on" if chat["off"] else "Снова пишу в этот чат.")
+        return
+    if word not in COMMANDS:
+        return
+    field, answer = COMMANDS[word]
+    if thread:
+        chat[field] = thread
+    else:
+        chat.pop(field, None)
+        answer = answer.replace("в эту тему", "в общий чат")
+    if fresh:
+        tg("sendMessage", chat_id=chat["id"], message_thread_id=thread, text=answer)
 
 
 def discover(chats):
@@ -48,14 +105,17 @@ def discover(chats):
     if not res.get("ok"):
         print("getUpdates:", res.get("description"))
         return
+    last = META["last_update"]
     for u in res["result"]:
+        fresh = u["update_id"] > last
+        META["last_update"] = max(META["last_update"], u["update_id"])
         if "my_chat_member" in u:
             m = u["my_chat_member"]
             chat, status = m["chat"], m["new_chat_member"]["status"]
             if status in ("left", "kicked"):
                 chats.pop(str(chat["id"]), None)
             else:
-                chats[str(chat["id"])] = {"id": chat["id"], "title": title_of(chat)}
+                chats.setdefault(str(chat["id"]), {"id": chat["id"]})["title"] = title_of(chat)
             continue
         msg = u.get("message") or u.get("channel_post")
         if not msg:
@@ -66,7 +126,8 @@ def discover(chats):
             new = msg["migrate_to_chat_id"]
             chats[str(new)] = {"id": new, "title": title_of(chat)}
         elif "left_chat_member" not in msg:
-            chats.setdefault(str(chat["id"]), {"id": chat["id"], "title": title_of(chat)})
+            entry = chats.setdefault(str(chat["id"]), {"id": chat["id"], "title": title_of(chat)})
+            command(entry, msg, fresh)
 
 
 def title_of(chat):
@@ -95,6 +156,8 @@ def message(name, ev):
         i = ev["issue"]
         t = link(i["html_url"], f"#{i['number']} {i['title']}")
         if action == "opened":
+            if any(lb.get("name") == "встреча" for lb in i.get("labels", [])):
+                return f"📅 Новая встреча {t}\nот {who}"
             return f"🆕 Новая задача {t}\nот {who}"
         if action == "closed":
             how = "закрыта как неактуальная" if i.get("state_reason") == "not_planned" else "выполнена"
@@ -141,6 +204,31 @@ def message(name, ev):
     return None
 
 
+def mentions(chat_id, chats):
+    """Кого тегнуть в чате: администраторы-люди и все, кто написал /join."""
+    people = dict((chats.get(chat_id) or {}).get("members", {}))
+    res = tg("getChatAdministrators", chat_id=chat_id)
+    for m in res.get("result", []) if res.get("ok") else []:
+        u = m["user"]
+        if not u.get("is_bot"):
+            people.setdefault(str(u["id"]), {"name": u.get("first_name") or u.get("username"), "username": u.get("username")})
+    return " ".join(f"@{p['username']}" if p.get("username") else f'<a href="tg://user?id={uid}">{e(p["name"])}</a>'
+                    for uid, p in people.items())
+
+
+def targets(chats, kind="github"):
+    """Куда слать: чаты из TELEGRAM_CHAT_ID и все известные чаты бота, с темой."""
+    out = [s.strip() for s in STATIC.split(",") if s.strip()]
+    static_ids = {t.partition(":")[0] for t in out}
+    for key, c in chats.items():
+        if key in static_ids or c.get("off"):
+            continue
+        thread = c.get("meetings_thread") if kind == "meetings" else None
+        thread = thread or c.get("thread")
+        out.append(f"{key}:{thread}" if thread else key)
+    return out
+
+
 def send(target, text, chats):
     chat_id, _, thread = target.partition(":")
     res = tg("sendMessage", chat_id=chat_id, message_thread_id=thread or None, text=text,
@@ -150,8 +238,8 @@ def send(target, text, chats):
     new = (res.get("parameters") or {}).get("migrate_to_chat_id")
     if new:
         old = chats.pop(chat_id, {})
-        chats[str(new)] = {"id": new, "title": old.get("title", str(new))}
-        return send(str(new), text, chats)
+        chats[str(new)] = {**old, "id": new}
+        return send(f"{new}:{thread}" if thread else str(new), text, chats)
     print(f"{chat_id}: {res.get('error_code')} {res.get('description')}")
     if res.get("error_code") == 403 or "chat not found" in str(res.get("description")):
         chats.pop(chat_id, None)
@@ -170,16 +258,21 @@ def main():
         with open(os.environ["GITHUB_EVENT_PATH"]) as f:
             text = message(name, json.load(f))
     if text:
-        targets = [s.strip() for s in STATIC.split(",") if s.strip()]
-        static_ids = {t.partition(":")[0] for t in targets}
-        targets += [k for k in list(chats) if k not in static_ids]
-        sent = sum(send(t, text, chats) for t in targets)
-        print(f"Отправлено в {sent} из {len(targets)} чатов")
+        to = targets(chats)
+        sent = sum(send(t, text, chats) for t in to)
+        print(f"Отправлено в {sent} из {len(to)} чатов")
     else:
         print("Нечего отправлять")
-    with open(STORE, "w") as f:
-        json.dump(list(chats.values()), f, ensure_ascii=False)
-    print("Чаты бота:", ", ".join(f"{c['title']} ({c['id']})" for c in chats.values()) or "нет")
+    save(chats)
+    print_chats(chats)
+
+
+def print_chats(chats):
+    def one(c):
+        extra = [f"тема {c['thread']}" if c.get("thread") else "", f"встречи — тема {c['meetings_thread']}" if c.get("meetings_thread") else ""]
+        extra = ", ".join(x for x in extra if x)
+        return f"{c.get('title', c['id'])} ({c['id']}{', ' + extra if extra else ''})"
+    print("Чаты бота:", "; ".join(one(c) for c in chats.values()) or "нет")
 
 
 if __name__ == "__main__":
