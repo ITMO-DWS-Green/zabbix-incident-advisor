@@ -12,6 +12,7 @@
   /meetings — напоминания о встречах писать в эту тему
   /join     — тегать меня за 15 минут до встреч (администраторов чата бот тегает сам)
   /leave    — не тегать меня
+  /off      — не писать в этот чат вообще; /on — снова писать
 Расписание раз в 6 часов в workflow подхватывает новые чаты и не даёт кэшу протухнуть.
 """
 import html
@@ -80,6 +81,12 @@ def command(chat, msg, fresh):
             answer = f"{name}, больше не тегаю."
         if fresh:
             tg("sendMessage", chat_id=chat["id"], message_thread_id=thread, text=answer)
+        return
+    if word in ("/off", "/on"):
+        chat["off"] = word == "/off"
+        if fresh:
+            tg("sendMessage", chat_id=chat["id"], message_thread_id=thread,
+               text="Больше не пишу в этот чат. Вернуть — /on" if chat["off"] else "Снова пишу в этот чат.")
         return
     if word not in COMMANDS:
         return
@@ -214,7 +221,7 @@ def targets(chats, kind="github"):
     out = [s.strip() for s in STATIC.split(",") if s.strip()]
     static_ids = {t.partition(":")[0] for t in out}
     for key, c in chats.items():
-        if key in static_ids:
+        if key in static_ids or c.get("off"):
             continue
         thread = c.get("meetings_thread") if kind == "meetings" else None
         thread = thread or c.get("thread")
