@@ -3,7 +3,7 @@
 ## Код
 Trunk-based development ([D-001](../architecture/decisions.md)): ветка от свежего `main` под задачу, слияние через Pull Request с одним аппрувом и зелёным CI, ветку после слияния удаляем.
 
-- Имя ветки: `<тип>/<номер задачи>-<кратко>`, тип — `feature`, `fix`, `spike`, `docs`, `infra`. Пример: `feature/8-metrics-detector`. Правило проверяется на GitHub.
+- Имя ветки: `<тип>/<номер задачи>-<кратко>`, тип — `feature`, `fix`, `spike`, `docs`, `infra`. Пример: `feature/8-metrics-detector`. Автоматически не проверяется (нужен Enterprise) — следим на ревью.
 - В описании PR — `Closes #N`, чтобы задача закрылась сама.
 - CI на каждый PR: сборка и тесты сервиса, затем сквозная проверка на живом Zabbix со стендом.
 - Как писать свой модуль — [development.md](../development.md).
