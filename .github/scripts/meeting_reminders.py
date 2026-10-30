@@ -169,8 +169,9 @@ def main():
             pkey = f"{issue['number']}@{started.isoformat()}:protocol" if started else None
             if started and started <= now and pkey not in sent:
                 text = meeting_protocol.build(started, protocol_for, os.environ["GITHUB_TOKEN"])
-                n = sum(tg.send(t, tg.e(text), chats) for t in targets)
-                print(f"  протокол отправлен в {n} из {len(targets)} чатов")
+                to = tg.targets(chats, "protocols")
+                n = sum(tg.send(t, tg.e(text), chats) for t in to)
+                print(f"  протокол отправлен в {n} из {len(to)} чатов")
                 try:
                     meeting_protocol.comment(issue["number"], text, os.environ["GITHUB_TOKEN"])
                 except Exception as ex:  # noqa: BLE001 — протокол в чате важнее комментария
