@@ -1,12 +1,53 @@
 name: CI
 
+# Когда что запускается:
+# - на PR в main и на push в main (без дублей push + PR на одну ветку);
+# - сборка и тесты — только если менялся service/ или сам CI;
+# - сквозная проверка — только если менялось то, что влияет на работу системы
+#   (код сервиса, не тесты; модуль интерфейса; infra/; compose.yaml; CI);
+# - вручную (Actions → CI → Run workflow) — всё.
+# Пропущенная проверка считается пройденной для защиты main.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Что изменилось
+    runs-on: ubuntu-latest
+    outputs:
+      service: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.service == 'true' }}
+      e2e: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.e2e == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          filters: |
+            service:
+              - 'service/**'
+              - '.github/workflows/ci.yml'
+            e2e:
+              - 'service/*/src/main/**'
+              - 'service/**/*.gradle.kts'
+              - 'service/gradle/**'
+              - 'service/Dockerfile'
+              - 'zabbix-module/**'
+              - 'infra/**'
+              - 'compose.yaml'
+              - '.github/workflows/ci.yml'
+
   service:
     name: Сервис — сборка и тесты
+    needs: changes
+    if: needs.changes.outputs.service == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,8 +73,12 @@ jobs:
 
   e2e:
     name: Сквозная проверка — Zabbix, сервис, модуль, стенд
+    needs: [changes, service]
+    # запускаем, даже если сборку пропустили (менялись только модуль или infra), но не после её падения
+    if: >-
+      always() && needs.changes.outputs.e2e == 'true' &&
+      (needs.service.result == 'success' || needs.service.result == 'skipped')
     runs-on: ubuntu-latest
-    needs: service
     timeout-minutes: 30
     env:
       ADVISOR_ANALYSIS_DELAY: 20s

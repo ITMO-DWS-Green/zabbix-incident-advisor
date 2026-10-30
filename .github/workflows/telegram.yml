@@ -1,0 +1,50 @@
+# Оповещения в Telegram во все чаты, где есть бот: задачи, комментарии, PR, ревью, упавший CI.
+# Секреты: TELEGRAM_BOT_TOKEN — обязательно; TELEGRAM_CHAT_ID — необязательно, чаты «всегда» через запятую.
+# Новый чат: добавьте туда бота — он попадёт в рассылку при следующем событии или в течение 6 часов.
+name: Telegram
+
+on:
+  issues:
+    types: [opened, closed, reopened, assigned]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, reopened, ready_for_review, review_requested, closed]
+  pull_request_review:
+    types: [submitted]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Оповещение
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request')
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+      - name: Список чатов бота
+        uses: actions/cache/restore@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
+          restore-keys: telegram-chats-
+      - name: Отправить
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python3 .github/scripts/telegram_notify.py
+      - name: Сохранить список чатов
+        if: always() && hashFiles('chats.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
