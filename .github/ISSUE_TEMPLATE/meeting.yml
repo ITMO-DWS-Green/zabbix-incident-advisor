@@ -26,6 +26,12 @@ body:
     attributes:
       label: Кто участвует
       placeholder: вся команда, заказчик
+  - type: input
+    id: protocol
+    attributes:
+      label: Протокол
+      description: Кого отметить в протоколе (Telegram). Если заполнено, в начале встречи бот пришлёт протокол — присутствовавшие и распределение по задачам — и сохранит его комментарием здесь
+      placeholder: "@AVEroshkin"
   - type: textarea
     id: agenda
     attributes:

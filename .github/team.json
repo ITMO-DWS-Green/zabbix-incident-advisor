@@ -1,0 +1,12 @@
+{
+  "_comment": "Команда для протоколов встреч: порядок — как в протоколе; github — логин для задач.",
+  "members": [
+    {"first": "Михаил", "last": "Катан", "github": "MishaKatan"},
+    {"first": "Роман", "last": "Макеев", "github": "gl4zis"},
+    {"first": "Евгений", "last": "Матеюк", "github": "jEUGENEdev"},
+    {"first": "Вячеслав", "last": "Ищенко", "github": "ByBinPy"},
+    {"first": "Михаил", "last": "Бочаров", "github": "ILoveMyasko"}
+  ],
+  "curator": "Ерошкин Александр Владимирович",
+  "customer": "Николаева Надежда"
+}
