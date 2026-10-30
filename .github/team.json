@@ -6,5 +6,7 @@
     {"first": "Евгений", "last": "Матеюк", "github": "jEUGENEdev"},
     {"first": "Вячеслав", "last": "Ищенко", "github": "ByBinPy"},
     {"first": "Михаил", "last": "Бочаров", "github": "ILoveMyasko"}
-  ]
+  ],
+  "curator": "Ерошкин Александр Владимирович",
+  "customer": "Николаева Надежда"
 }

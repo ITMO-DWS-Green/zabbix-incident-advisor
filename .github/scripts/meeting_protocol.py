@@ -26,13 +26,13 @@ def api(path, token, payload=None, method=None):
 
 
 def assigned(token):
-    """github-логин → список URL открытых задач, где он исполнитель."""
+    """github-логин → список (название, URL) открытых задач, где он исполнитель."""
     out = {}
     for i in api("/issues?state=open&assignee=*&per_page=100&sort=created&direction=asc", token):
         if "pull_request" in i or any(lb["name"] == "встреча" for lb in i["labels"]):
             continue
         for a in i["assignees"]:
-            out.setdefault(a["login"].lower(), []).append(i["html_url"])
+            out.setdefault(a["login"].lower(), []).append((i["title"], i["html_url"]))
     return out
 
 
@@ -41,9 +41,9 @@ def text(date, tag, members, tasks):
     lines += [f"{m['last']} {m['first']}" for m in members]
     lines += ["", "Распределение по задачам:"]
     for m in members:
-        urls = tasks.get(m["github"].lower(), [])
+        items = tasks.get(m["github"].lower(), [])
         lines.append(f"{m['first']} {m['last']}:")
-        lines += [f"{n}) {u}" for n, u in enumerate(urls, 1)] or ["задач нет"]
+        lines += [f"{n}) {title} — {url}" for n, (title, url) in enumerate(items, 1)] or ["задач нет"]
         lines.append("")
     return "\n".join(lines).rstrip()
 
