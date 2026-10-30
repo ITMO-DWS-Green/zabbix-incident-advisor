@@ -135,6 +135,26 @@ def reminder(issue, at, now, sent, allday=False):
     return "\n".join(lines), f"{key}:{kind}"
 
 
+def send_protocol(issue, started, tag, chats, sent, key, now):
+    """Протокол в чаты и комментарием в задачу. Не отправился никуда — попробуем в следующий запуск."""
+    try:
+        text = meeting_protocol.build(started, tag, os.environ["GITHUB_TOKEN"])
+    except OSError as ex:
+        print("  протокол: не удалось получить задачи —", ex)
+        return
+    to = tg.targets(chats, "protocols")
+    n = sum(tg.send(t, tg.e(text), chats) for t in to)
+    print(f"  протокол отправлен в {n} из {len(to)} чатов")
+    if to and not n:
+        print("  не отправился ни в один чат — попробуем в следующий запуск")
+        return
+    try:
+        meeting_protocol.comment(issue["number"], text, os.environ["GITHUB_TOKEN"])
+    except OSError as ex:
+        print("  комментарий с протоколом:", ex)
+    sent[key] = now.isoformat()
+
+
 def meetings():
     repo = os.environ["GITHUB_REPOSITORY"]
     req = urllib.request.Request(
@@ -157,7 +177,12 @@ def main():
     chats = tg.load()
     tg.discover(chats)
     targets = tg.targets(chats, "meetings")
-    for issue in meetings():
+    try:
+        issues = meetings()
+    except OSError as ex:  # GitHub недоступен — команды бота уже обработаны, встречи проверим в следующий раз
+        print("::warning::Не удалось получить встречи:", ex)
+        issues = []
+    for issue in issues:
         when = field(issue.get("body"), "Когда")
         rule = parse(when) if when else None
         if not rule:
@@ -168,15 +193,7 @@ def main():
             started = next_at(rule, now - dt.timedelta(minutes=30))
             pkey = f"{issue['number']}@{started.isoformat()}:protocol" if started else None
             if started and started <= now and pkey not in sent:
-                text = meeting_protocol.build(started, protocol_for, os.environ["GITHUB_TOKEN"])
-                to = tg.targets(chats, "protocols")
-                n = sum(tg.send(t, tg.e(text), chats) for t in to)
-                print(f"  протокол отправлен в {n} из {len(to)} чатов")
-                try:
-                    meeting_protocol.comment(issue["number"], text, os.environ["GITHUB_TOKEN"])
-                except Exception as ex:  # noqa: BLE001 — протокол в чате важнее комментария
-                    print("  комментарий с протоколом:", ex)
-                sent[pkey] = now.isoformat()
+                send_protocol(issue, started, protocol_for, chats, sent, pkey, now)
         at = next_at(rule, now)
         print(f"#{issue['number']} {issue['title']}: следующая {at:%d.%m %H:%M}" if at else f"#{issue['number']}: встреч впереди нет")
         if not at:
@@ -190,7 +207,8 @@ def main():
             else:
                 n = sum(tg.send(t, text, chats) for t in targets)
             print(f"  напоминание отправлено в {n} из {len(targets)} чатов")
-            sent[key] = now.isoformat()
+            if n or not targets:
+                sent[key] = now.isoformat()
     week_ago = (now - dt.timedelta(days=7)).isoformat()
     sent = {k: v for k, v in sent.items() if v > week_ago}
     with open(SENT, "w") as f:
