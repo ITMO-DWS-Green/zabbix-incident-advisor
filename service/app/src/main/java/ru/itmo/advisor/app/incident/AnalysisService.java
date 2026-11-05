@@ -29,7 +29,9 @@ import ru.itmo.advisor.domain.port.ZabbixWriter;
 /**
  * Конвейер разбора — только порядок шагов, без логики:
  * граф → данные → отклонения метрик → логи → подозреваемые → объяснение → сохранить →
- * комментарий в Zabbix → причина и симптомы.
+ * комментарий к каждой проблеме инцидента в Zabbix → причина и симптомы.
+ *
+ * <p>Разбор один на инцидент: в него попадают хосты всех проблем инцидента.
  */
 @Service
 public class AnalysisService {
@@ -83,7 +85,8 @@ public class AnalysisService {
             Explanation explanation = writer.write(context, suspects, deviations, logs);
             result = new AnalysisResult(now, context.scope(), suspects, deviations, logs, explanation);
             incidents.saveAnalysis(incidentId, result);
-            LOG.info("Разобран инцидент {} ({}): источник {}", incidentId, incident.triggerName(), result.topSuspect());
+            LOG.info("Разобран инцидент {} ({}, проблем: {}): источник {}", incidentId, incident.triggerName(),
+                    incident.problems().size(), result.topSuspect());
         } catch (RuntimeException e) {
             LOG.warn("Разбор инцидента {} не удался: {}", incidentId, e.getMessage(), e);
             incidents.saveFailure(incidentId, e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -92,23 +95,39 @@ public class AnalysisService {
         afterAnalysis(incident, result);
     }
 
+    /**
+     * Проблема присоединилась к инциденту, который уже разобран: разбор не повторяем,
+     * только пишем его комментарием и к ней.
+     */
+    public void onProblemJoined(Incident incident, long eventId) {
+        if (incident.analysisStatus() == AnalysisStatus.DONE && incident.analysis() != null) {
+            comment(eventId, incident.analysis());
+        }
+    }
+
     /** Запись в Zabbix — отдельно: её ошибка не отменяет уже сохранённый разбор. */
     private void afterAnalysis(Incident incident, AnalysisResult result) {
-        if (props.zabbix().comment() && result.explanation() != null) {
-            try {
-                zabbix.comment(incident.problemEventId(), COMMENT_PREFIX + result.explanation().summary());
-            } catch (RuntimeException e) {
-                LOG.warn("Комментарий к проблеме {} не записан: {}", incident.problemEventId(), e.getMessage());
-            }
-        }
+        // Перечитываем: пока шёл разбор, к инциденту могли присоединиться проблемы.
         Incident analyzed = incidents.find(incident.id()).orElse(incident);
+        analyzed.problemEventIds().forEach(eventId -> comment(eventId, result));
         try {
             causes.causeOf(analyzed, incidents.findOpen()).ifPresent(cause -> {
-                zabbix.markSymptom(incident.problemEventId(), cause);
-                LOG.info("Проблема {} помечена симптомом {}", incident.problemEventId(), cause);
+                zabbix.markSymptom(analyzed.problemEventId(), cause);
+                LOG.info("Проблема {} помечена симптомом {}", analyzed.problemEventId(), cause);
             });
         } catch (RuntimeException e) {
-            LOG.warn("Причина и симптомы для {} не записаны: {}", incident.problemEventId(), e.getMessage());
+            LOG.warn("Причина и симптомы для {} не записаны: {}", analyzed.problemEventId(), e.getMessage());
+        }
+    }
+
+    private void comment(long eventId, AnalysisResult result) {
+        if (!props.zabbix().comment() || result.explanation() == null) {
+            return;
+        }
+        try {
+            zabbix.comment(eventId, COMMENT_PREFIX + result.explanation().summary());
+        } catch (RuntimeException e) {
+            LOG.warn("Комментарий к проблеме {} не записан: {}", eventId, e.getMessage());
         }
     }
 }

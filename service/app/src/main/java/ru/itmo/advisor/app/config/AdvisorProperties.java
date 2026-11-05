@@ -5,13 +5,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Настройки из application.yml, префикс {@code advisor}. Переменные окружения: ADVISOR_ANALYSIS_DELAY и т. п. */
 @ConfigurationProperties("advisor")
-public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analysis, Llm llm) {
+public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analysis, Llm llm, Incident incident) {
 
     public AdvisorProperties {
         zabbix = zabbix == null ? new Zabbix(null, null, null, null) : zabbix;
         security = security == null ? new Security(null, null) : security;
         analysis = analysis == null ? new Analysis(null, null, null, null, null, null) : analysis;
         llm = llm == null ? new Llm(null, null, null, null, null) : llm;
+        incident = incident == null ? new Incident(null) : incident;
     }
 
     /**
@@ -60,6 +61,16 @@ public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analy
             baseUrl = blank(baseUrl) ? "http://ollama:11434/v1" : baseUrl;
             model = blank(model) ? "qwen2.5:3b" : model;
             timeout = timeout == null ? Duration.ofSeconds(60) : timeout;
+        }
+    }
+
+    /**
+     * @param mergeWindow проблемы на связанных по карте сервисах, начавшиеся не дальше этого от начала инцидента,
+     *                    попадают в один инцидент; {@code 0} — не объединять
+     */
+    public record Incident(Duration mergeWindow) {
+        public Incident {
+            mergeWindow = mergeWindow == null ? Duration.ofSeconds(60) : mergeWindow;
         }
     }
 

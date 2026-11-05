@@ -27,6 +27,7 @@ import ru.itmo.advisor.domain.model.Feedback;
 import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentStatus;
+import ru.itmo.advisor.domain.model.Problem;
 import ru.itmo.advisor.domain.model.Tag;
 
 /** API для модуля интерфейса Zabbix: список и карточка инцидента, повторный разбор, оценка инженером. */
@@ -49,20 +50,20 @@ public class IncidentController {
 
     public record Summary(UUID id, long problemEventId, String triggerName, int severity, List<HostRef> hosts,
                           Instant startedAt, Instant resolvedAt, IncidentStatus status, AnalysisStatus analysisStatus,
-                          String topSuspect, String summary) {
+                          String topSuspect, String summary, int problemCount) {
 
         static Summary of(Incident i) {
             AnalysisResult a = i.analysis();
             return new Summary(i.id(), i.problemEventId(), i.triggerName(), i.severity(), i.hosts(), i.startedAt(),
                     i.resolvedAt(), i.status(), i.analysisStatus(), a == null ? null : a.topSuspect(),
-                    a == null || a.explanation() == null ? null : a.explanation().summary());
+                    a == null || a.explanation() == null ? null : a.explanation().summary(), i.problems().size());
         }
     }
 
     public record Details(UUID id, long problemEventId, String triggerName, int severity, List<HostRef> hosts,
                           List<Tag> tags, Instant startedAt, Instant resolvedAt, IncidentStatus status,
                           AnalysisStatus analysisStatus, String analysisError, AnalysisResult analysis,
-                          List<Feedback> feedback) {
+                          List<Feedback> feedback, List<Problem> problems) {
     }
 
     public record FeedbackRequest(@NotNull Feedback.Verdict verdict, String actualSource, String comment) {
@@ -78,7 +79,7 @@ public class IncidentController {
         return incidents.find(id)
                 .map(i -> new Details(i.id(), i.problemEventId(), i.triggerName(), i.severity(), i.hosts(), i.tags(),
                         i.startedAt(), i.resolvedAt(), i.status(), i.analysisStatus(), i.analysisError(),
-                        i.analysis(), feedback.findByIncident(i.id())))
+                        i.analysis(), feedback.findByIncident(i.id()), i.problems()))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

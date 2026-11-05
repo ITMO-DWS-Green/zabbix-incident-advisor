@@ -49,6 +49,7 @@ flowchart LR
 | `LogEvidenceExtractor` | Характерные строки логов | `analysis-logs` | заглушка | FR-06 | [#10](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/10) |
 | `SuspectRanker` | Ранжированный список подозреваемых | `analysis-ranking` | кто отклонился раньше — образец | FR-05 | [#9](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/9) |
 | `CauseSymptomPolicy` | Какую проблему считать причиной текущей | `analysis-ranking` | заглушка | FR-15 | [#16](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/16) |
+| `IncidentMergePolicy` | В какой открытый инцидент добавить новую проблему | `analysis-ranking` | связь по карте + окно от начала инцидента | — | [#40](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/40) |
 | `ExplanationWriter` | Объяснение для комментария и карточки | `analysis-explain` | шаблон, при LLM — пересказ | FR-07, FR-14 | [#11](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/11) |
 | `QualityEvaluator` | Сверка разборов с разметкой | `analysis-evaluation` | совпадение по времени — образец | FR-09, FR-10 | [#15](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/15) |
 | `ValueStreamProcessor` | Обработка потока значений из коннектора | `analysis-stream` | заглушка | FR-13 | [#19](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/19), [#26](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/26), [#30](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/30) |
@@ -71,7 +72,8 @@ flowchart LR
 
 | Таблица | Что хранит |
 |---|---|
-| `incident` | Инцидент, статус разбора, результат разбора целиком (JSONB) |
+| `incident` | Инцидент: шапка по его проблемам, статус разбора, результат разбора целиком (JSONB) |
+| `incident_problem` | Проблемы Zabbix инцидента: событие, триггер, хосты, начало, закрытие |
 | `feedback` | Оценки разбора инженерами |
 | `fault_label` | Разметка сбоев стенда |
 | `llm_audit` | Журнал запросов к LLM в замаскированном виде |
