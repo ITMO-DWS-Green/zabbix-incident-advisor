@@ -20,7 +20,7 @@ concurrency:
 jobs:
   changes:
     name: Что изменилось
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       service: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.service == 'true' }}
       e2e: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.e2e == 'true' }}
@@ -48,7 +48,7 @@ jobs:
     name: Сервис — сборка и тесты
     needs: changes
     if: needs.changes.outputs.service == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: service
