@@ -25,6 +25,7 @@ x-stand: &stand
 
 x-stand-env: &stand-env
   TESTSERVER_COLLECTOR_URL: http://advisor:8080   # разметка сбоев → сервис (оценка точности)
+  TESTSERVER_COLLECTOR_TELEMETRY: "false"         # логи и метрики идут через Zabbix, не в сервис
 
 services:
   # ---------------- Zabbix ----------------
