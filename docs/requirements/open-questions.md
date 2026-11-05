@@ -19,7 +19,7 @@
 
 | # | Вопрос | Решение | Дата |
 |---|---|---|---|
-| 1 | Как логи test-server попадают в Zabbix? | Предложено [D-005](../architecture/decisions.md), проверяем в [#6](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/6) | |
+| 1 | Как логи test-server попадают в Zabbix? | Через файл и агент Zabbix, [D-005](../architecture/decisions.md), реализовано в [#6](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/6) | 2026-10-30 |
 | 2 | Своё хранилище для инцидентов и разборов? | [D-007](../architecture/decisions.md), реализовано в каркасе | |
 | 3 | Оповещение: действие Zabbix или свой бот? | Предложено [D-006](../architecture/decisions.md), делаем в [#17](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/17) | |
 | 4 | На чём ML-часть, если до неё дойдём: Java или Python? | Интерфейсы в `domain` позволяют вынести модель в отдельный сервис | обсуждаем в [#3](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/3) |
