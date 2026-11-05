@@ -45,7 +45,7 @@ class ZabbixContextSourceTest {
                         "ERROR [database] ChaosFilter - Unhandled exception: Pool exhausted", null, null, null, null)));
         when(zabbix.history(eq(ValueType.FLOAT), any(), any(), any(), anyInt())).thenReturn(List.of());
 
-        IncidentContext context = new ZabbixContextSource(zabbix, new AdvisorProperties(null, null, null, null))
+        IncidentContext context = new ZabbixContextSource(zabbix, new AdvisorProperties(null, null, null, null, null))
                 .load(incident(), new ServiceGraph(Map.of("database", Set.of())), NOW);
 
         assertThat(context.logs()).hasSize(1);
