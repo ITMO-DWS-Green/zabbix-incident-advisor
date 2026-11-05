@@ -32,6 +32,8 @@ advisor:
     max-items-per-host: 50
     history-limit: 20000
     threads: 2
+  incident:
+    merge-window: 60s     # ADVISOR_INCIDENT_MERGE_WINDOW: окно объединения проблем в инцидент, 0 — не объединять
   llm:
     provider: stub
     base-url: http://ollama:11434/v1

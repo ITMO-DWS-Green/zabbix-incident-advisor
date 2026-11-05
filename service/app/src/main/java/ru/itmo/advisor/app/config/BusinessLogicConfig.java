@@ -8,10 +8,12 @@ import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
 import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
+import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
 import ru.itmo.advisor.analysis.stream.NoopValueStreamProcessor;
 import ru.itmo.advisor.domain.port.CauseSymptomPolicy;
 import ru.itmo.advisor.domain.port.ExplanationWriter;
+import ru.itmo.advisor.domain.port.IncidentMergePolicy;
 import ru.itmo.advisor.domain.port.LlmClient;
 import ru.itmo.advisor.domain.port.LogEvidenceExtractor;
 import ru.itmo.advisor.domain.port.MetricDeviationDetector;
@@ -51,6 +53,11 @@ public class BusinessLogicConfig {
     @Bean
     CauseSymptomPolicy causeSymptomPolicy() {
         return new NoCauseSymptomPolicy();
+    }
+
+    @Bean
+    IncidentMergePolicy incidentMergePolicy(AdvisorProperties props) {
+        return new GraphWindowMergePolicy(props.incident().mergeWindow());
     }
 
     @Bean

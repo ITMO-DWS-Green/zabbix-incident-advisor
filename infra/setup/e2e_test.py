@@ -1,6 +1,6 @@
 """Сквозная проверка всей цепочки на поднятом compose (с профилем stand):
 
-сбой на test-server → триггер Zabbix → коннектор → инцидент в сервисе → разбор →
+сбой на test-server → триггеры Zabbix → коннектор → один инцидент на каскад → разбор →
 комментарий к проблеме в Zabbix → разметка сбоя от test-server → отчёт о точности.
 """
 import json
@@ -100,6 +100,18 @@ def main():
 
     incident = wait("инцидент разобран", analyzed, 480)
     print(f"  {incident['triggerName']}: источник {incident['topSuspect']}; {incident['summary']}")
+
+    def cascade_merged():
+        problems = advisor(f"/api/incidents/{incident['id']}")["problems"]
+        hosts = {h["host"] for p in problems for h in p["hosts"]}
+        return len(hosts) >= 2 and problems
+
+    problems = wait("каскад от database — один инцидент из проблем нескольких сервисов", cascade_merged, 120)
+    print(f"  проблемы инцидента: {[p['triggerName'] for p in problems]}")
+    others = [i["triggerName"] for i in advisor("/api/incidents")
+              if i["id"] != incident["id"] and "5xx" in i["triggerName"]]
+    if others:
+        sys.exit(f"каскад разбит на несколько инцидентов: лишние {others}")
 
     token = zabbix("user.login", {"username": "Admin", "password": "zabbix"})
 

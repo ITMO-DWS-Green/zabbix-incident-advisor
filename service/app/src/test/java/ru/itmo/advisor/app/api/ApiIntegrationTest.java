@@ -1,10 +1,13 @@
 package ru.itmo.advisor.app.api;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -34,6 +37,9 @@ class ApiIntegrationTest {
     @Autowired
     MockMvc mvc;
 
+    @Autowired
+    ObjectMapper json;
+
     @Test
     void problemFromConnectorBecomesIncidentAndRecoveryResolvesIt() throws Exception {
         String problem = """
@@ -57,6 +63,50 @@ class ApiIntegrationTest {
 
         mvc.perform(get("/api/incidents").header("X-Advisor-Token", "ui"))
                 .andExpect(jsonPath("$[0].status").value("RESOLVED"));
+    }
+
+    /** Zabbix в тесте нет, карта связей пустая — объединяются проблемы одного хоста. */
+    @Test
+    void relatedProblemsAreOneIncidentResolvedWithTheLastProblem() throws Exception {
+        events("""
+                {"clock":1761700000,"ns":0,"value":1,"eventid":2001,"name":"payments: задержка выше 1 с","severity":2,"hosts":[{"host":"payments","name":"payments"}],"tags":[]}
+                {"clock":1761700020,"ns":0,"value":1,"eventid":2002,"name":"payments: доля 5xx выше 10%","severity":3,"hosts":[{"host":"payments","name":"payments"}],"tags":[]}
+                """);
+        events("""
+                {"clock":1761700020,"ns":0,"value":1,"eventid":2002,"name":"payments: доля 5xx выше 10%","severity":3,"hosts":[{"host":"payments","name":"payments"}],"tags":[]}
+                """);
+
+        JsonNode incident = incidentWithEvent(2001);
+        assertThat(incident.get("problemCount").asInt()).isEqualTo(2);
+        assertThat(incident.get("severity").asInt()).isEqualTo(3);
+        String id = incident.get("id").asText();
+        mvc.perform(get("/api/incidents/" + id).header("X-Advisor-Token", "ui"))
+                .andExpect(jsonPath("$.problems.length()").value(2))
+                .andExpect(jsonPath("$.problems[1].eventId").value(2002))
+                .andExpect(jsonPath("$.problems[1].triggerName").value("payments: доля 5xx выше 10%"));
+
+        events("{\"clock\":1761700100,\"ns\":0,\"value\":0,\"eventid\":2003,\"p_eventid\":2001}\n");
+        assertThat(incidentWithEvent(2001).get("status").asText()).isEqualTo("OPEN");
+        events("{\"clock\":1761700200,\"ns\":0,\"value\":0,\"eventid\":2004,\"p_eventid\":2002}\n");
+        assertThat(incidentWithEvent(2001).get("status").asText()).isEqualTo("RESOLVED");
+        assertThat(incidentWithEvent(2001).get("resolvedAt").asText()).startsWith("2025-10-29T01:10:00");
+    }
+
+    private void events(String ndjson) throws Exception {
+        mvc.perform(post("/zabbix/connector/events").header("Authorization", "Bearer conn")
+                        .contentType("application/x-ndjson").content(ndjson))
+                .andExpect(status().isOk());
+    }
+
+    private JsonNode incidentWithEvent(long eventId) throws Exception {
+        String body = mvc.perform(get("/api/incidents").header("X-Advisor-Token", "ui"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        for (JsonNode i : json.readTree(body)) {
+            if (i.get("problemEventId").asLong() == eventId) {
+                return i;
+            }
+        }
+        throw new AssertionError("нет инцидента с проблемой " + eventId + ": " + body);
     }
 
     @Test

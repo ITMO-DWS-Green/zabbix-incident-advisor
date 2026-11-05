@@ -98,7 +98,7 @@ class AnalysisServiceTest {
         return new AnalysisService(incidents, source, new TagServiceGraphProvider(), new BaselineDeviationDetector(),
                 new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer,
-                new AdvisorProperties(null, null, null, null), Clock.fixed(START.plusSeconds(120), ZoneOffset.UTC));
+                new AdvisorProperties(null, null, null, null, null), Clock.fixed(START.plusSeconds(120), ZoneOffset.UTC));
     }
 
     /** gateway → orders → database; задержка database выросла раньше, чем ошибки у остальных. */

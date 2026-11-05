@@ -13,6 +13,7 @@ import ru.itmo.advisor.domain.model.AnalysisResult;
 import ru.itmo.advisor.domain.model.AnalysisStatus;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentStatus;
+import ru.itmo.advisor.domain.model.Problem;
 
 /** Хранилище в памяти для тестов без БД. */
 class InMemoryIncidentRepository implements IncidentRepository {
@@ -21,11 +22,22 @@ class InMemoryIncidentRepository implements IncidentRepository {
 
     @Override
     public Optional<Incident> createIfAbsent(Incident i) {
-        if (findByEventId(i.problemEventId()).isPresent()) {
+        if (i.problems().stream().anyMatch(p -> findByEventId(p.eventId()).isPresent())) {
             return Optional.empty();
         }
         byId.put(i.id(), i);
         return Optional.of(i);
+    }
+
+    @Override
+    public Optional<Incident> addProblem(UUID incidentId, Problem problem) {
+        Incident i = byId.get(incidentId);
+        if (i == null || findByEventId(problem.eventId()).isPresent()) {
+            return Optional.empty();
+        }
+        Incident updated = i.withProblem(problem);
+        byId.put(incidentId, updated);
+        return Optional.of(updated);
     }
 
     @Override
@@ -35,7 +47,7 @@ class InMemoryIncidentRepository implements IncidentRepository {
 
     @Override
     public Optional<Incident> findByEventId(long e) {
-        return byId.values().stream().filter(i -> i.problemEventId() == e).findFirst();
+        return byId.values().stream().filter(i -> i.problemEventIds().contains(e)).findFirst();
     }
 
     @Override
@@ -60,31 +72,33 @@ class InMemoryIncidentRepository implements IncidentRepository {
 
     @Override
     public void resolve(long e, Instant at) {
-        findByEventId(e).ifPresent(i -> byId.put(i.id(), with(i, IncidentStatus.RESOLVED, at, i.analysisStatus(),
-                i.analysis(), i.analysisError())));
+        findByEventId(e).ifPresent(i -> byId.put(i.id(), i.withProblems(i.problems().stream()
+                .map(p -> p.eventId() == e && p.isOpen()
+                        ? new Problem(p.eventId(), p.triggerName(), p.severity(), p.hosts(), p.tags(), p.startedAt(), at)
+                        : p)
+                .toList())));
     }
 
     @Override
     public void setAnalysisStatus(UUID id, AnalysisStatus s) {
         Incident i = byId.get(id);
-        byId.put(id, with(i, i.status(), i.resolvedAt(), s, i.analysis(), i.analysisError()));
+        byId.put(id, with(i, s, i.analysis(), i.analysisError()));
     }
 
     @Override
     public void saveAnalysis(UUID id, AnalysisResult r) {
         Incident i = byId.get(id);
-        byId.put(id, with(i, i.status(), i.resolvedAt(), AnalysisStatus.DONE, r, null));
+        byId.put(id, with(i, AnalysisStatus.DONE, r, null));
     }
 
     @Override
     public void saveFailure(UUID id, String error) {
         Incident i = byId.get(id);
-        byId.put(id, with(i, i.status(), i.resolvedAt(), AnalysisStatus.FAILED, i.analysis(), error));
+        byId.put(id, with(i, AnalysisStatus.FAILED, i.analysis(), error));
     }
 
-    private static Incident with(Incident i, IncidentStatus st, Instant resolved, AnalysisStatus as,
-                                 AnalysisResult a, String err) {
+    private static Incident with(Incident i, AnalysisStatus as, AnalysisResult a, String err) {
         return new Incident(i.id(), i.problemEventId(), i.triggerName(), i.severity(), i.hosts(), i.tags(),
-                i.startedAt(), resolved, st, as, a, err);
+                i.startedAt(), i.resolvedAt(), i.status(), as, a, err, i.problems());
     }
 }
