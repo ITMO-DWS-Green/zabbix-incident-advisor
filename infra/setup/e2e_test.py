@@ -73,6 +73,15 @@ def check_module_page():
     return True
 
 
+def log_lines(token, host, since):
+    """Строки лог-элемента хоста (агент читает файл сервиса) с момента since."""
+    item = zabbix("item.get", {"host": host, "filter": {"value_type": 2}, "output": ["itemid"]}, token)
+    assert item, f"у хоста {host} нет лог-элемента"
+    rows = zabbix("history.get", {"history": 2, "itemids": [item[0]["itemid"]], "time_from": int(since),
+                                  "output": "extend", "limit": 5000}, token)
+    return [r["value"] for r in rows]
+
+
 def main():
     info = wait("сервис видит Zabbix", lambda: (i := advisor("/api/info")).get("zabbixVersion") and i, 300)
     print(f"  {info}")
@@ -100,6 +109,15 @@ def main():
         return any(PREFIX in a["message"] for e in events for a in e["acknowledges"])
 
     wait("разбор записан комментарием к проблеме в Zabbix", commented, 120)
+
+    def logs_arrived():
+        # источник сбоя пишет исключение 5xx, вызывающие — «downstream … responded»
+        source = [l for l in log_lines(token, "database", started) if "Unhandled exception" in l]
+        callers = [l for l in log_lines(token, "payments", started) if "downstream database" in l]
+        return (source and callers) and (len(source), len(callers))
+
+    counts = wait("строки логов сбоя дошли до Zabbix (database и payments)", logs_arrived, 120)
+    print(f"  строк с исключением на database: {counts[0]}, с «downstream database» на payments: {counts[1]}")
 
     remaining = FAULT_SECONDS - (time.time() - started) + 20
     if remaining > 0:

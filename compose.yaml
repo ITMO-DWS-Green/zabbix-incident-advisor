@@ -21,6 +21,7 @@ x-stand: &stand
   image: incident-advisor/test-server:local
   restart: unless-stopped
   mem_limit: 384m
+  volumes: [stand-logs:/var/log/stand]   # лог-файлы сервисов; их читает zabbix-agent2
 
 x-stand-env: &stand-env
   TESTSERVER_COLLECTOR_URL: http://advisor:8080   # разметка сбоев → сервис (оценка точности)
@@ -72,8 +73,10 @@ services:
     image: zabbix/zabbix-agent2:alpine-7.0-latest
     restart: unless-stopped
     environment:
-      ZBX_HOSTNAME: Zabbix server
+      # Имена хостов стенда в Hostname: один агент отдаёт серверу лог-элементы (активные проверки) за все сервисы
+      ZBX_HOSTNAME: Zabbix server,gateway,orders,payments,database
       ZBX_SERVER_HOST: zabbix-server
+    volumes: [stand-logs:/var/log/stand:ro]
     depends_on: [zabbix-server]
 
   # Настройка Zabbix через API: токен сервиса, коннекторы, модуль, хосты стенда. Один раз и завершается.
@@ -142,6 +145,7 @@ services:
     environment:
       <<: *stand-env
       TESTSERVER_SERVICENAME: gateway
+      LOGGING_FILE_NAME: /var/log/stand/gateway.log
       TESTSERVER_DOWNSTREAM: orders
       TESTSERVER_TRAFFIC_RPS: ${TRAFFIC_RPS:-10}
 
@@ -150,6 +154,7 @@ services:
     environment:
       <<: *stand-env
       TESTSERVER_SERVICENAME: orders
+      LOGGING_FILE_NAME: /var/log/stand/orders.log
       TESTSERVER_DOWNSTREAM: payments,database
 
   payments:
@@ -157,6 +162,7 @@ services:
     environment:
       <<: *stand-env
       TESTSERVER_SERVICENAME: payments
+      LOGGING_FILE_NAME: /var/log/stand/payments.log
       TESTSERVER_DOWNSTREAM: database
 
   database:
@@ -164,6 +170,7 @@ services:
     environment:
       <<: *stand-env
       TESTSERVER_SERVICENAME: database
+      LOGGING_FILE_NAME: /var/log/stand/database.log
 
   # ---------------- Локальная LLM (profile ollama) ----------------
   ollama:
@@ -184,3 +191,4 @@ volumes:
   advisor-db:
   secrets:
   ollama:
+  stand-logs:
