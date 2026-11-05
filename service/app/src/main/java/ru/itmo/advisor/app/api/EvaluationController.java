@@ -15,7 +15,7 @@ import ru.itmo.advisor.domain.port.QualityEvaluator;
 
 /**
  * Точность разбора на стенде (идея 7).
- * {@code /api/v1/labels} и {@code /api/v1/telemetry} — тот же контракт, что у log-collector,
+ * {@code /api/v1/labels} — тот же контракт, что у log-collector,
  * поэтому test-server с {@code COLLECTOR_URL=http://advisor:8080} шлёт разметку прямо сюда.
  */
 @RestController
@@ -34,12 +34,6 @@ public class EvaluationController {
     @PostMapping("/api/v1/labels")
     public ResponseEntity<Void> label(@RequestBody FaultLabel label) {
         labels.save(label);
-        return ResponseEntity.accepted().build();
-    }
-
-    /** Телеметрию test-server собирает сам Zabbix — здесь она не нужна. */
-    @PostMapping("/api/v1/telemetry")
-    public ResponseEntity<Void> telemetry() {
         return ResponseEntity.accepted().build();
     }
 
