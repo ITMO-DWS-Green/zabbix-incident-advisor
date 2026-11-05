@@ -72,7 +72,7 @@ ExplanationWriter.write(...)
 | Коннектор событий | Все события → `/zabbix/connector/events`, Bearer-токен |
 | Коннектор значений | Элементы с тегом `advisor` → `/zabbix/connector/values` |
 | Модуль интерфейса | Папка смонтирована в zabbix-web, модуль включён через `module.create` |
-| Хосты стенда | Группа `test-server`, теги `depends_on`, метрики и триггеры |
+| Хосты стенда | Группа `test-server`, теги `depends_on`, метрики, триггеры и лог-элемент `log[…]` (его читает `zabbix-agent2` из общего тома `stand-logs`) |
 | Кэш конфигурации | `ZBX_CACHEUPDATEFREQUENCY=10` — новые триггеры работают через 10 с |
 
 Для боевого Zabbix: отдельный пользователь с правами чтения на нужные группы и записи триггеров, свой API-токен, свои секреты `ADVISOR_UI_TOKEN` и `ADVISOR_CONNECTOR_TOKEN`, адрес сервиса в `zabbix-module/incident-advisor/config.php`.

@@ -4,7 +4,8 @@
 2. Токен API для сервиса → файл /secrets/zabbix-api-token (сервис читает его при каждом вызове).
 3. Коннекторы: события → сервис; значения элементов с тегом advisor → сервис.
 4. Модуль интерфейса incident-advisor зарегистрирован и включён.
-5. Хосты стенда test-server с тегом depends_on (карта связей), метриками и триггерами.
+5. Хосты стенда test-server с тегом depends_on (карта связей), метриками, триггерами и лог-элементом
+   (агент читает файл, который пишет сервис).
 
 Повторный запуск безопасен: существующее не дублируется, токен пересоздаётся.
 """
@@ -22,6 +23,7 @@ ADVISOR_URL = os.environ.get("ADVISOR_URL", "http://advisor:8080").rstrip("/")
 CONNECTOR_TOKEN = os.environ.get("ADVISOR_CONNECTOR_TOKEN", "dev-connector-token")
 TOKEN_FILE = os.environ.get("TOKEN_FILE", "/secrets/zabbix-api-token")
 STAND_URL = os.environ.get("STAND_URL_PATTERN", "http://{service}:8080")
+STAND_LOG_DIR = os.environ.get("STAND_LOG_DIR", "/var/log/stand")  # общий том сервисов стенда и zabbix-agent2
 
 # Стенд test-server: кто кого вызывает (совпадает с compose.yaml репозитория test-server).
 STAND = {
@@ -31,8 +33,8 @@ STAND = {
     "database": [],
 }
 
-HTTP_AGENT, DEPENDENT = 19, 18
-FLOAT, CHAR, TEXT = 0, 1, 4
+HTTP_AGENT, DEPENDENT, ZABBIX_ACTIVE = 19, 18, 7
+FLOAT, CHAR, LOG, TEXT = 0, 1, 2, 4
 JSONPATH, JAVASCRIPT = 12, 21
 BEARER = 5
 EVENTS, ITEM_VALUES = 1, 0
@@ -119,8 +121,22 @@ def ratio(field):
     return f"var s = JSON.parse(value).stats; return s.requests > 0 ? s.{field} / s.requests : 0;"
 
 
+def ensure_log_item(hostid, service):
+    """Активная проверка агента: имя хоста в Zabbix = Hostname агента (compose.yaml). 100 строк/с — запас на поток ошибок."""
+    key = f"log[{STAND_LOG_DIR}/{service}.log,,,100]"
+    if call("item.get", {"hostids": [hostid], "filter": {"key_": [key]}}):
+        return
+    call("item.create", {
+        "hostid": hostid, "name": "Лог сервиса", "key_": key, "type": ZABBIX_ACTIVE, "value_type": LOG,
+        "delay": "1s", "history": "1d", "tags": [{"tag": "component", "value": "logs"}],
+    })
+    print(f"Хост {service}: лог-элемент {key}")
+
+
 def create_stand_host(service, deps, groupid):
-    if call("host.get", {"filter": {"host": [service]}}):
+    existing = call("host.get", {"filter": {"host": [service]}, "output": ["hostid"]})
+    if existing:
+        ensure_log_item(existing[0]["hostid"], service)
         print(f"Хост {service} уже есть")
         return
     tags = [{"tag": "stand", "value": "test-server"}]
@@ -159,6 +175,7 @@ def create_stand_host(service, deps, groupid):
     ]
     call("trigger.create", [{"description": d, "expression": e, "priority": p,
                              "tags": [{"tag": "service", "value": service}]} for d, e, p in triggers])
+    ensure_log_item(hostid, service)
     print(f"Хост {service} → {base}, зависит от: {', '.join(deps) or '—'}")
 
 

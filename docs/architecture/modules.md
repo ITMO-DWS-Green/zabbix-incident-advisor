@@ -63,7 +63,6 @@ flowchart LR
 | Коннектор Zabbix → сервис | `POST /zabbix/connector/events` | NDJSON событий, ответ 200 | Bearer `ADVISOR_CONNECTOR_TOKEN` |
 | Коннектор Zabbix → сервис | `POST /zabbix/connector/values` | NDJSON значений элементов с тегом `advisor` | Bearer `ADVISOR_CONNECTOR_TOKEN` |
 | test-server → сервис | `POST /api/v1/labels` | Разметка сбоя; контракт test-server не меняем | открыт внутри сети стенда |
-| test-server → сервис | `POST /api/v1/telemetry` | Принимается и игнорируется; отключаем в [#39](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/39) | открыт |
 | Модуль → сервис | `GET /api/incidents`, `/api/incidents/{id}`, `POST /api/incidents/{id}/reanalyze`, `/feedback`, `GET /api/evaluation`, `/api/info` | JSON | заголовки `X-Advisor-Token`, `X-Advisor-User` |
 | Сервис → Zabbix | `/api_jsonrpc.php` | JSON-RPC 2.0 | API-токен Zabbix |
 | Сервис → LLM | `{base}/chat/completions` | OpenAI-совместимый | ключ `ADVISOR_LLM_API_KEY` |
