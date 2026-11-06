@@ -177,7 +177,14 @@ services:
   # ---------------- Локальная LLM (profile ollama) ----------------
   ollama:
     profiles: [ollama]
-    image: ollama/ollama:0.6.8
+    image: ollama/ollama:latest
+    deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: all
+                capabilities: [gpu]
     restart: unless-stopped
     volumes: [ollama:/root/.ollama]
 
@@ -185,7 +192,7 @@ services:
     profiles: [ollama]
     image: curlimages/curl:8.13.0
     restart: "no"
-    command: ["sh", "-c", "sleep 5 && curl -sf http://ollama:11434/api/pull -d '{\"name\":\"${ADVISOR_LLM_MODEL:-qwen2.5:3b}\"}'"]
+    command: ["sh", "-c", "sleep 5 && curl -sf http://ollama:11434/api/pull -d '{\"name\":\"${ADVISOR_LLM_MODEL}\"}'"]
     depends_on: [ollama]
 
 volumes:

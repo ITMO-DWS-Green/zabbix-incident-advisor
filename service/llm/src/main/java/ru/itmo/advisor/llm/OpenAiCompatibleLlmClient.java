@@ -53,6 +53,9 @@ public class OpenAiCompatibleLlmClient implements LlmClient {
             }
             JsonNode answer = json.readTree(response.body());
             String text = answer.at("/choices/0/message/content").asText("");
+            text = text.replaceAll("(?s)<\\|channel>thought.*?<channel\\|>", "")
+                    .replaceAll("(?s)<think>.*?</think>", "")
+                    .trim();
             return new Response(text, answer.path("model").asText(model), (System.nanoTime() - start) / 1_000_000);
         } catch (IOException e) {
             throw new LlmException("LLM недоступна: " + e.getMessage(), e);
