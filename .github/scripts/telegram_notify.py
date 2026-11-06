@@ -22,6 +22,7 @@ import html
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,15 +34,21 @@ API = f"https://api.telegram.org/bot{TOKEN}/"
 
 
 def tg(method, **params):
+    """Вызов Bot API. Сетевые сбои не роняют запуск: 3 попытки, потом {"ok": False}."""
     data = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None}).encode()
-    try:
-        with urllib.request.urlopen(API + method, data, timeout=20) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
+    for attempt in range(3):
         try:
-            return json.load(e)
-        except ValueError:
-            return {"ok": False, "error_code": e.code, "description": str(e)}
+            with urllib.request.urlopen(API + method, data, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            try:
+                return json.load(e)
+            except ValueError:
+                return {"ok": False, "error_code": e.code, "description": str(e)}
+        except (OSError, ValueError) as e:  # таймаут, обрыв соединения, битый ответ
+            print(f"{method}: попытка {attempt + 1} — {e}")
+            time.sleep(2 * (attempt + 1))
+    return {"ok": False, "description": "Telegram не ответил"}
 
 
 META = {"last_update": 0}
