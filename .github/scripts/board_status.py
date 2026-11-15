@@ -28,9 +28,12 @@ ITEMS = """
 query($org: String!, $num: Int!, $after: String) {
   organization(login: $org) { projectV2(number: $num) { title
     items(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes {
+      isArchived
       status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
       content {
-        ... on Issue { number title url state repository { nameWithOwner } assignees(first: 5) { nodes { login } } }
+        __typename
+        ... on Issue { number title url state repository { nameWithOwner }
+          assignees(first: 100) { nodes { login } } labels(first: 100) { nodes { name } } }
         ... on PullRequest { number title url state isDraft repository { nameWithOwner } author { login } }
       } } } } } }"""
 
@@ -50,23 +53,35 @@ def gql(token, query, **variables):
 def project_number(token):
     if os.environ.get("PROJECT_NUMBER"):
         return int(os.environ["PROJECT_NUMBER"])
-    for p in gql(token, PROJECTS, org=OWNER)["organization"]["projectsV2"]["nodes"]:
+    org = gql(token, PROJECTS, org=OWNER).get("organization")
+    if org is None:
+        raise RuntimeError("проекты организации недоступны — проверьте PROJECT_TOKEN")
+    for p in org["projectsV2"]["nodes"]:
         if not p["closed"] and any((n.get("content") or {}).get("repository", {}).get("nameWithOwner") == REPO
                                    for n in p["items"]["nodes"]):
             return p["number"]
     raise RuntimeError("не нашёл доску с задачами этого репозитория — задайте переменную PROJECT_NUMBER")
 
 
-def from_board(token):
+def board_items(token):
+    """Все страницы выбранной доски; при ошибке не возвращаем частичную выборку."""
     num, after, rows = project_number(token), None, []
     while True:
-        items = gql(token, ITEMS, org=OWNER, num=num, after=after)["organization"]["projectV2"]["items"]
+        org = gql(token, ITEMS, org=OWNER, num=num, after=after).get("organization")
+        project = (org or {}).get("projectV2")
+        if project is None:
+            raise RuntimeError("доска недоступна — проверьте PROJECT_TOKEN и PROJECT_NUMBER")
+        items = project["items"]
         rows += items["nodes"]
         if not items["pageInfo"]["hasNextPage"]:
             break
         after = items["pageInfo"]["endCursor"]
+    return rows
+
+
+def from_board(token):
     work, review = {}, []
-    for n in rows:
+    for n in board_items(token):
         c, status = n.get("content") or {}, ((n.get("status") or {}).get("name") or "").lower()
         if c.get("repository", {}).get("nameWithOwner") != REPO or c.get("state") != "OPEN":
             continue

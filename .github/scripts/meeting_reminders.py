@@ -138,18 +138,18 @@ def reminder(issue, at, now, sent, allday=False):
 def send_protocol(issue, started, tag, chats, sent, key, now):
     """Протокол в чаты и комментарием в задачу. Не отправился никуда — попробуем в следующий запуск."""
     try:
-        text = meeting_protocol.build(started, tag, os.environ["GITHUB_TOKEN"])
-    except OSError as ex:
+        protocol = meeting_protocol.build(started, tag, issue)
+    except (OSError, RuntimeError, ValueError) as ex:
         print("  протокол: не удалось получить задачи —", ex)
         return
     to = tg.targets(chats, "protocols")
-    n = sum(tg.send(t, tg.e(text), chats) for t in to)
+    n = sum(tg.send(t, protocol.card, chats) for t in to)
     print(f"  протокол отправлен в {n} из {len(to)} чатов")
     if to and not n:
         print("  не отправился ни в один чат — попробуем в следующий запуск")
         return
     try:
-        meeting_protocol.comment(issue["number"], text, os.environ["GITHUB_TOKEN"])
+        meeting_protocol.comment(issue["number"], protocol.comment, os.environ["GITHUB_TOKEN"])
     except OSError as ex:
         print("  комментарий с протоколом:", ex)
     sent[key] = now.isoformat()
