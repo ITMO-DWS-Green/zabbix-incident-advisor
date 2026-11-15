@@ -1,0 +1,39 @@
+name: Тестовый протокол
+
+on:
+  push:
+    branches: [test/protocol-20261115]
+    paths:
+      - .github/workflows/protocol-smoke.yml
+      - .github/scripts/protocol_smoke.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-bot
+  cancel-in-progress: false
+
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - name: Проверить фильтр и форматирование
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Прочитать настроенные темы бота
+        uses: actions/cache/restore@v4
+        with:
+          path: chats.json
+          key: telegram-chats-${{ github.run_id }}
+          restore-keys: telegram-chats-
+      - name: Отправить тестовый протокол
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          TELEGRAM_RICH_MESSAGES: ${{ vars.TELEGRAM_RICH_MESSAGES || 'true' }}
+        run: python3 .github/scripts/protocol_smoke.py --send
