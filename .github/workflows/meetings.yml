@@ -44,6 +44,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          TELEGRAM_RICH_MESSAGES: ${{ vars.TELEGRAM_RICH_MESSAGES || 'true' }}
         run: python3 .github/scripts/meeting_reminders.py
       - name: Запомнить отправленные
         if: always() && hashFiles('sent.json') != ''

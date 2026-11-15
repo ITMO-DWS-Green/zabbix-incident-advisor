@@ -38,4 +38,5 @@ jobs:
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHATS: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_RICH_MESSAGES: ${{ vars.TELEGRAM_RICH_MESSAGES || 'true' }}
         run: python3 .github/scripts/telegram_notify.py

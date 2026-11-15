@@ -27,6 +27,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from telegram_cards import Card, issue_card
+
 TOKEN = os.environ.get("TOKEN", "")
 STATIC = os.environ.get("CHATS", "")
 STORE = os.environ.get("STORE", "chats.json")
@@ -174,6 +176,9 @@ def short(s):
 
 
 def message(name, ev):
+    rich = issue_card(name, ev)
+    if rich is not None:
+        return rich
     who = (ev.get("sender") or {}).get("login", "")
     action = ev.get("action")
     if name == "issues":
@@ -256,8 +261,24 @@ def targets(chats, kind="github"):
 
 def send(target, text, chats):
     chat_id, _, thread = target.partition(":")
-    res = tg("sendMessage", chat_id=chat_id, message_thread_id=thread or None, text=text,
-             parse_mode="HTML", disable_web_page_preview="true")
+    route = {"chat_id": chat_id, "message_thread_id": thread or None}
+    if isinstance(text, Card):
+        rich_enabled = os.environ.get("TELEGRAM_RICH_MESSAGES", "true").lower() != "false"
+        res = tg("sendRichMessage", **route, rich_message=json.dumps({"html": text.rich_html}, ensure_ascii=False)) \
+            if rich_enabled else None
+        # Только явный отказ API: после timeout исход неизвестен, другой метод дал бы дубль.
+        fallback = res is None or (res.get("error_code") in (400, 404)
+                                   and not res.get("parameters")
+                                   and "chat not found" not in str(res.get("description")))
+        if fallback:
+            if res:
+                print("Rich Message отклонён, отправляю HTML-вариант:", res.get("description"))
+            for part in text.fallback_parts:
+                res = tg("sendMessage", **route, text=part, parse_mode="HTML", disable_web_page_preview="true")
+                if not res.get("ok"):
+                    break
+    else:
+        res = tg("sendMessage", **route, text=text, parse_mode="HTML", disable_web_page_preview="true")
     if res.get("ok"):
         return True
     new = (res.get("parameters") or {}).get("migrate_to_chat_id")
