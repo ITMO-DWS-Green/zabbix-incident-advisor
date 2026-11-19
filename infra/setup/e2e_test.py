@@ -1,7 +1,8 @@
 """Сквозная проверка всей цепочки на поднятом compose (с профилем stand):
 
 сбой на test-server → триггеры Zabbix → коннектор → один инцидент на каскад → разбор →
-комментарий к проблеме в Zabbix → разметка сбоя от test-server → отчёт о точности.
+комментарий к проблеме в Zabbix → оповещение с разбором в чат команды (заглушка Telegram) →
+разметка сбоя от test-server → отчёт о точности.
 """
 import json
 import os
@@ -13,8 +14,11 @@ ZABBIX = os.environ.get("ZABBIX_URL", "http://localhost:8070")
 ADVISOR = os.environ.get("ADVISOR_URL", "http://localhost:8095")
 STAND = os.environ.get("STAND_URL", "http://localhost:8090")
 UI_TOKEN = os.environ.get("ADVISOR_UI_TOKEN", "dev-ui-token")
+TELEGRAM = os.environ.get("TELEGRAM_STUB_URL", "http://localhost:8088")
 FAULT_SECONDS = 150
 PREFIX = "[incident-advisor]"
+# Совпадает со справочником команд в setup.py и TELEGRAM_CHAT_IDS в compose.yaml.
+SOURCE_TEAM_CHAT = os.environ.get("SOURCE_TEAM_CHAT", "-1004")  # database → команда data
 
 
 def http(method, url, body=None, headers=None):
@@ -121,6 +125,25 @@ def main():
         return any(PREFIX in a["message"] for e in events for a in e["acknowledges"])
 
     wait("разбор записан комментарием к проблеме в Zabbix", commented, 120)
+
+    def notified():
+        """Действие Zabbix по тегу team шлёт комментарий-разбор в чат команды источника, а не во все чаты."""
+        try:
+            lines = http("GET", TELEGRAM + "/messages")
+        except Exception:  # noqa: BLE001 — заглушка ещё не получила сообщение
+            return None
+        if isinstance(lines, str):
+            messages = [json.loads(l) for l in lines.splitlines() if l.strip()]
+        else:
+            messages = []
+        hits = [m for m in messages if PREFIX in m.get("body", {}).get("text", "")]
+        return hits if hits else None
+
+    delivered = wait("разбор пришёл в Telegram-чат команды", notified, 180)
+    chats = {m["body"].get("chat_id") for m in delivered}
+    if str(SOURCE_TEAM_CHAT) not in {str(c) for c in chats}:
+        sys.exit(f"разбор ушёл не в чат команды источника ({SOURCE_TEAM_CHAT}): {chats}")
+    print(f"  разбор доставлен в чат команды data ({SOURCE_TEAM_CHAT})")
 
     def logs_arrived():
         # источник сбоя пишет исключение 5xx, вызывающие — «downstream … responded»

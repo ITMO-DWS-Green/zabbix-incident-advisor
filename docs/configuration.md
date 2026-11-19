@@ -15,6 +15,9 @@
 | `ADVISOR_LLM_API_KEY` | — | ключ, если нужен |
 | `ADVISOR_UI_TOKEN` | `dev-ui-token` | секрет между модулем интерфейса и сервисом |
 | `ADVISOR_CONNECTOR_TOKEN` | `dev-connector-token` | токен, с которым приходит коннектор Zabbix |
+| `TELEGRAM_BOT_TOKEN` | — | токен бота для оповещения о разборе; задаётся контейнеру `setup`, в репозитории не хранится. Без него тип оповещения создаётся выключенным |
+| `TELEGRAM_API_URL` | `https://api.telegram.org/bot` | куда вебхук шлёт сообщения; на стенде — заглушка `http://telegram-stub:8080/bot` |
+| `TELEGRAM_CHAT_IDS` | — | id групповых чатов команд: `platform:-1001,orders:-1002,…`. Незаданная команда получает id-заглушку |
 
 Для профиля Ollama задавайте `ADVISOR_LLM_MODEL` явно: [инструкция запуска](getting-started.md). Значение в таблице — резервное значение Java-сервиса; [`.env.example`](../.env.example) задаёт другую модель.
 
