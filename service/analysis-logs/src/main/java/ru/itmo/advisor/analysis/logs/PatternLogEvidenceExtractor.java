@@ -19,8 +19,10 @@ import ru.itmo.advisor.domain.port.LogEvidenceExtractor;
  * заменены), шаблоны считаются до «начала инцидента минус {@value #LEAD_MINUTES} мин» и после. Проблема в Zabbix
  * появляется позже самого сбоя (триггеры усредняют значения), поэтому первые строки ошибок написаны ещё до
  * {@code startedAt}; та же граница у {@code BaselineDeviationDetector}. В доказательства попадают новые шаблоны
- * и те, что участились в {@value #SURGE_FACTOR} раз и больше. Обычные INFO и ниже не берутся никогда;
- * на сервис — не больше {@code maxPerHost}, ERROR раньше WARN.
+ * и те, что участились в {@value #SURGE_FACTOR} раз и больше. Если на сервисе таких нет — например, тот же сбой
+ * повторился через несколько минут после прошлого и его шаблоны уже есть в базовой линии, — берутся его частые
+ * ERROR (не меньше {@value #SURGE_MIN_COUNT} повторов) без отметки «новая». Обычные INFO и ниже не берутся
+ * никогда; на сервис — не больше {@code maxPerHost}, ERROR раньше WARN.
  *
  * <p>Уровень берётся из текста строки (формат Spring Boot и похожие): у файловых {@code log[]}-элементов Zabbix
  * поле severity пустое. Строка без распознанного уровня годится как доказательство, только если она новая или
@@ -88,18 +90,27 @@ public class PatternLogEvidenceExtractor implements LogEvidenceExtractor {
         }
 
         List<LogEvidence> result = new ArrayList<>();
-        byHost.values().forEach(patterns -> patterns.values().stream()
-                .filter(s -> s.inWindow > 0 && (s.before == 0 || s.surged(beforeSeconds, windowSeconds)))
+        byHost.values().forEach(patterns -> {
+            List<Stats> chosen = top(patterns.values().stream()
+                    .filter(s -> s.inWindow > 0 && (s.before == 0 || s.surged(beforeSeconds, windowSeconds))));
+            if (chosen.isEmpty()) {
+                chosen = top(patterns.values().stream().filter(s -> s.rank == ERROR && s.inWindow >= SURGE_MIN_COUNT));
+            }
+            chosen.forEach(s -> result.add(new LogEvidence(s.host, s.itemId, s.pattern, s.example, s.inWindow,
+                    s.firstSeen, s.before == 0)));
+        });
+        return result;
+    }
+
+    private List<Stats> top(java.util.stream.Stream<Stats> candidates) {
+        return candidates
                 .sorted(Comparator.comparingInt((Stats s) -> -s.rank)
                         .thenComparing(s -> s.before != 0)
                         .thenComparingInt(s -> -s.inWindow)
                         .thenComparing(s -> s.firstSeen)
                         .thenComparing(s -> s.pattern))
                 .limit(maxPerHost)
-                .map(s -> new LogEvidence(s.host, s.itemId, s.pattern, s.example, s.inWindow, s.firstSeen,
-                        s.before == 0))
-                .forEach(result::add));
-        return result;
+                .toList();
     }
 
     /** Короткий lookback не должен оставить базовую линию пустой: тогда любая строка выглядела бы новой. */

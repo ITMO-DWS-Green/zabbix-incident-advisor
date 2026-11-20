@@ -74,6 +74,36 @@ class PatternLogEvidenceExtractorTest {
     }
 
     @Test
+    void repeatedFaultStillShowsItsErrorsWhenThePatternIsAlreadyInTheBaseline() {
+        // прошлый сбой закончился минуты назад: его строки в базовой линии, роста в 5 раз нет
+        Lines database = new Lines("database");
+        for (int s = -840; s < -400; s += 2) {
+            database.at(s, "ERROR", "r.i.t.chaos.ChaosFilter", "Unhandled exception while processing GET /api/orders/{n}: Deadlock");
+        }
+        database.every(0, 3, "ERROR", "r.i.t.chaos.ChaosFilter", "Unhandled exception while processing GET /api/orders/{n}: Deadlock");
+
+        assertThat(extractor.extract(context(database))).singleElement().satisfies(e -> {
+            assertThat(e.newInWindow()).isFalse();
+            assertThat(e.count()).isEqualTo(21);
+            assertThat(e.example()).contains(" ERROR [database] ");
+        });
+    }
+
+    @Test
+    void strayKnownErrorsAndKnownWarningsAreNotFallbackEvidence() {
+        Lines orders = new Lines("orders");
+        for (int s = -840; s <= -400; s += 60) {
+            orders.at(s, "ERROR", "r.i.t.A", "cache miss storm");
+            orders.at(s, "WARN", "r.i.t.A", "slow query");
+        }
+        orders.at(10, "ERROR", "r.i.t.A", "cache miss storm");
+        orders.at(20, "ERROR", "r.i.t.A", "cache miss storm");
+        orders.every(0, 10, "WARN", "r.i.t.A", "slow query");
+
+        assertThat(extractor.extract(context(orders))).isEmpty();
+    }
+
+    @Test
     void steadyBackgroundWarningsAndInfoGiveNoEvidence() {
         Lines orders = new Lines("orders");
         orders.every(-840, 30, "INFO", "r.i.t.shop.OrderController", "Order {n} create ok");
