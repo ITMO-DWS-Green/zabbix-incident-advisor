@@ -69,6 +69,21 @@ class ZabbixApiTest {
     }
 
     @Test
+    void latestHistoryAsksForNewestRecordsButReturnsThemOldestFirst() throws IOException {
+        ZabbixApi api = start(r -> """
+                {"jsonrpc":"2.0","id":1,"result":[
+                  {"itemid":"7","clock":"1761382900","ns":"0","value":"newer"},
+                  {"itemid":"7","clock":"1761382800","ns":"0","value":"older"}]}""");
+
+        var records = api.latestHistory(ValueType.LOG, List.of("7"),
+                Instant.ofEpochSecond(1761382000), Instant.ofEpochSecond(1761383000), 2);
+
+        assertThat(requests.get(0).at("/params/sortorder").asText()).isEqualTo("DESC");
+        assertThat(requests.get(0).at("/params/limit").asInt()).isEqualTo(2);
+        assertThat(records).extracting(rec -> rec.clock()).containsExactly(1761382800L, 1761382900L);
+    }
+
+    @Test
     void apiErrorBecomesException() throws IOException {
         ZabbixApi api = start(r -> """
                 {"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Invalid params.","data":"No permissions."}}""");

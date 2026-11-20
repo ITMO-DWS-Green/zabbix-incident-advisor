@@ -15,7 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
-import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
+import ru.itmo.advisor.analysis.logs.PatternLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
@@ -312,7 +312,7 @@ class IncidentServiceTest {
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
         return new AnalysisService(incidents, new StandSource(), new TagServiceGraphProvider(),
-                new BaselineDeviationDetector(), new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
+                new BaselineDeviationDetector(), new PatternLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer, props(),
                 Clock.fixed(T0.plusSeconds(120), ZoneOffset.UTC));
     }

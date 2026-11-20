@@ -40,7 +40,7 @@ class ZabbixContextSourceTest {
                 item("1", ValueType.LOG, "log[/var/log/stand/database.log,,,100]", List.of(new Tag("component", "logs"))),
                 item("2", ValueType.TEXT, "testserver.status", List.of()),
                 item("3", ValueType.FLOAT, "testserver.error_rate", List.of())));
-        when(zabbix.history(eq(ValueType.LOG), any(), any(), any(), anyInt())).thenReturn(List.of(
+        when(zabbix.latestHistory(eq(ValueType.LOG), eq(List.of("1")), any(), any(), anyInt())).thenReturn(List.of(
                 new HistoryRecord("1", NOW.minusSeconds(30).getEpochSecond(), 0,
                         "ERROR [database] ChaosFilter - Unhandled exception: Pool exhausted", null, null, null, null)));
         when(zabbix.history(eq(ValueType.FLOAT), any(), any(), any(), anyInt())).thenReturn(List.of());
