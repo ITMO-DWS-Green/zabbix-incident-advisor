@@ -8,6 +8,8 @@
 | `ADVISOR_ANALYSIS_LOOKBACK` | `15m` | сколько истории до начала брать в разбор |
 | `ADVISOR_ANALYSIS_GRAPH_DEPTH` | `2` | насколько далеко по карте связей брать соседей |
 | `ADVISOR_INCIDENT_MERGE_WINDOW` | `60s` | окно объединения: проблема на связанном сервисе, начавшаяся не дальше этого от начала инцидента, входит в него; `0` — не объединять |
+| `ADVISOR_RETENTION_INCIDENTS` | `90d` | срок хранения инцидента после закрытия |
+| `ADVISOR_RETENTION_LLM_AUDIT` | `90d` | срок хранения записи журнала LLM с момента её создания |
 | `ADVISOR_ZABBIX_COMMENT` | `true` | писать ли разбор комментарием к проблеме |
 | `ADVISOR_LLM_PROVIDER` | `stub` | `stub` — без модели; `openai` — OpenAI-совместимый API |
 | `ADVISOR_LLM_BASE_URL` | `http://ollama:11434/v1` | адрес API модели |
@@ -23,6 +25,12 @@
 
 PHP-модуль читает `INCIDENT_ADVISOR_URL` и `INCIDENT_ADVISOR_TOKEN` из окружения `zabbix-web`. Его токен должен совпадать с `ADVISOR_UI_TOKEN` сервиса; исправление автоматической передачи через Compose отслеживается в [#82](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/82).
 
+В **Monitoring → Incident advisor → Хранение данных** администратор Zabbix может изменить оба срока. Сохранённые в базе значения имеют приоритет над переменными окружения и применяются при ближайшей очистке без перезапуска сервиса. До первого сохранения действуют значения из окружения.
+
+В Compose отдельный токен для настроек создаёт контейнер `setup`. При установке вне Compose задай один и тот же секрет через `ADVISOR_RETENTION_ADMIN_TOKEN` в Java-сервисе и `INCIDENT_ADVISOR_RETENTION_TOKEN` в окружении PHP-модуля.
+
+Очистка выполняется ежедневно в 03:00 UTC. Сроки хранения задаются положительными интервалами, например `30d` или `12h`. Открытые инциденты сохраняются до закрытия. Вместе с просроченным инцидентом удаляются его проблемы и оценки инженеров. Разметка стенда хранится отдельно.
+
 ## API сервиса
 
 | Метод | Путь | Кто вызывает |
@@ -34,6 +42,7 @@ PHP-модуль читает `INCIDENT_ADVISOR_URL` и `INCIDENT_ADVISOR_TOKEN`
 | POST | `/api/incidents/{id}/feedback` | модуль: «разбор верный / неверный» |
 | GET | `/api/evaluation?scenarioId=` | точность на размеченных сбоях |
 | GET | `/api/info` | состояние: Zabbix, LLM |
+| GET, POST | `/api/settings/retention` | чтение и сохранение сроков хранения через прокси Zabbix администратором |
 | POST | `/api/v1/labels` | test-server: разметка сбоя |
 
 Форматы, защита и таблицы БД описаны в [модулях и контрактах](architecture/modules.md).

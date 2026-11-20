@@ -195,7 +195,7 @@ class IncidentServiceTest {
     }
 
     private static AdvisorProperties props() {
-        return new AdvisorProperties(null, null, null, null, null);
+        return new AdvisorProperties(null, null, null, null, null, null);
     }
 
     /** Карта стенда и данные каскада из {@link AnalysisServiceTest}. */

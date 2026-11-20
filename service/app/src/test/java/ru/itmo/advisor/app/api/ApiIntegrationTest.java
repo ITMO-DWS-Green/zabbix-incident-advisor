@@ -8,16 +8,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import ru.itmo.advisor.app.storage.RetentionCleanup;
 
 /** Сквозь HTTP и настоящую PostgreSQL: коннектор → инцидент → API интерфейса. Zabbix не нужен. */
 @SpringBootTest(properties = {
@@ -25,6 +29,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     "advisor.zabbix.token=test",
     "advisor.security.ui-token=ui",
     "advisor.security.connector-token=conn",
+    "ADVISOR_RETENTION_ADMIN_TOKEN=admin-settings",
+    "ADVISOR_RETENTION_INCIDENTS=60d",
+    "ADVISOR_RETENTION_LLM_AUDIT=14d",
 })
 @AutoConfigureMockMvc
 @Testcontainers
@@ -39,6 +46,91 @@ class ApiIntegrationTest {
 
     @Autowired
     ObjectMapper json;
+
+    @Autowired
+    JdbcClient jdbc;
+
+    @Autowired
+    RetentionCleanup retentionCleanup;
+
+    @Test
+    @Transactional
+    void retentionDeletesOnlyExpiredRecords() throws Exception {
+        mvc.perform(post("/api/settings/retention").header("X-Advisor-Token", "ui")
+                        .header("X-Advisor-Retention-Token", "admin-settings").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"incidents":"30d","llmAudit":"7d"}
+                                """))
+                .andExpect(status().isOk());
+
+        jdbc.sql("""
+                INSERT INTO incident (id, problem_event_id, trigger_name, severity, started_at, resolved_at,
+                                      status, analysis_status)
+                VALUES (gen_random_uuid(), 3601, 'old resolved', 2, now() - interval '60 days',
+                        now() - interval '31 days', 'RESOLVED', 'DONE'),
+                       (gen_random_uuid(), 3602, 'recently resolved', 2, now() - interval '60 days',
+                        now() - interval '29 days', 'RESOLVED', 'DONE'),
+                       (gen_random_uuid(), 3603, 'still open', 2, now() - interval '60 days',
+                        NULL, 'OPEN', 'DONE')
+                """).update();
+        jdbc.sql("""
+                INSERT INTO incident_problem (event_id, incident_id, trigger_name, severity, started_at, resolved_at)
+                SELECT problem_event_id, id, trigger_name, severity, started_at, resolved_at
+                FROM incident WHERE problem_event_id BETWEEN 3601 AND 3603
+                """).update();
+        jdbc.sql("""
+                INSERT INTO feedback (incident_id, verdict)
+                SELECT id, 'CORRECT' FROM incident WHERE problem_event_id BETWEEN 3601 AND 3602
+                """).update();
+        jdbc.sql("""
+                INSERT INTO llm_audit (created_at, purpose, request, duration_ms)
+                VALUES (now() - interval '8 days', 'retention-expired', 'request', 1),
+                       (now() - interval '6 days', 'retention-recent', 'request', 1)
+                """).update();
+
+        retentionCleanup.deleteExpired();
+
+        assertThat(jdbc.sql("SELECT problem_event_id FROM incident WHERE problem_event_id BETWEEN 3601 AND 3603")
+                .query(Long.class).list()).containsExactlyInAnyOrder(3602L, 3603L);
+        assertThat(jdbc.sql("SELECT event_id FROM incident_problem WHERE event_id BETWEEN 3601 AND 3603")
+                .query(Long.class).list()).containsExactlyInAnyOrder(3602L, 3603L);
+        assertThat(jdbc.sql("SELECT incident_id FROM feedback").query(UUID.class).list())
+                .containsExactly(jdbc.sql("SELECT id FROM incident WHERE problem_event_id = 3602")
+                        .query(UUID.class).single());
+        assertThat(jdbc.sql("SELECT purpose FROM llm_audit WHERE purpose LIKE 'retention-%'")
+                .query(String.class).list()).containsExactly("retention-recent");
+    }
+
+    @Test
+    @Transactional
+    void onlyZabbixAdminsCanChangeRetentionSettings() throws Exception {
+        String path = "/api/settings/retention";
+        String valid = "{\"incidents\":\"30d\",\"llmAudit\":\"7d\"}";
+        mvc.perform(post(path).header("X-Advisor-Retention-Token", "admin-settings")
+                        .contentType(MediaType.APPLICATION_JSON).content(valid))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("X-Advisor-Token", "ui")
+                        .contentType(MediaType.APPLICATION_JSON).content(valid))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(path).header("X-Advisor-Token", "ui"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(path).header("X-Advisor-Token", "ui").header("X-Advisor-Retention-Token", "admin-settings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incidents").value("60d"))
+                .andExpect(jsonPath("$.llmAudit").value("14d"));
+
+        mvc.perform(post(path).header("X-Advisor-Token", "ui").header("X-Advisor-Retention-Token", "admin-settings")
+                        .contentType(MediaType.APPLICATION_JSON).content(valid))
+                .andExpect(status().isOk());
+        mvc.perform(post(path).header("X-Advisor-Token", "ui").header("X-Advisor-Retention-Token", "admin-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"incidents\":\"0d\",\"llmAudit\":\"2d\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get(path).header("X-Advisor-Token", "ui").header("X-Advisor-Retention-Token", "admin-settings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incidents").value("30d"))
+                .andExpect(jsonPath("$.llmAudit").value("7d"));
+    }
 
     @Test
     void problemFromConnectorBecomesIncidentAndRecoveryResolvesIt() throws Exception {

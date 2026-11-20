@@ -178,6 +178,7 @@
 				el('header', {class: 'ia-header'}, this.info,
 					el('div', {class: 'ia-header-actions'}, this.liveBtn, this.refreshBtn)),
 				this.banner,
+				root.dataset.canManageRetention === '1' ? this.retentionPanel() : document.createDocumentFragment(),
 				this.stats,
 				el('div', {class: 'ia-layout'},
 					el('aside', {class: 'ia-side'},
@@ -206,6 +207,57 @@
 		}
 
 		// ---------- шапка ----------
+
+		retentionPanel() {
+			const path = '/api/settings/retention';
+			const incidents = el('input', {type: 'text', class: 'ia-field', required: true, disabled: true});
+			const llmAudit = el('input', {type: 'text', class: 'ia-field', required: true, disabled: true});
+			const save = el('button', {type: 'submit', class: 'ia-btn ia-btn-primary ia-btn-sm', disabled: true},
+				'Сохранить');
+			const status = el('span', {role: 'status'});
+			let loading = false;
+			const showSettings = settings => {
+				incidents.value = settings.incidents;
+				llmAudit.value = settings.llmAudit;
+			};
+			const setDisabled = disabled => {
+				incidents.disabled = llmAudit.disabled = save.disabled = disabled;
+			};
+			const form = el('form', {class: 'ia-retention-form', onsubmit: async e => {
+				e.preventDefault();
+				setDisabled(true);
+				status.textContent = 'Сохраняю…';
+				try {
+					showSettings(await this.api.post(path, {incidents: incidents.value, llmAudit: llmAudit.value}));
+					status.textContent = 'Сохранено. Сроки применятся при ближайшей очистке.';
+				} catch (error) {
+					status.textContent = 'Не удалось сохранить: ' + error.message;
+				} finally {
+					setDisabled(false);
+				}
+			}},
+				el('label', {}, 'Закрытые инциденты — с момента закрытия', incidents),
+				el('label', {}, 'Журнал LLM — с момента записи', llmAudit),
+				el('div', {class: 'ia-retention-actions'}, save, status));
+			const panel = el('details', {class: 'ia-retention', ontoggle: async () => {
+				if (!panel.open || incidents.value || loading) return;
+				loading = true;
+				status.textContent = 'Загружаю настройки…';
+				try {
+					showSettings(await this.api.get(path));
+					setDisabled(false);
+					status.textContent = '';
+				} catch (error) {
+					status.textContent = 'Не удалось загрузить настройки: ' + error.message;
+				} finally {
+					loading = false;
+				}
+			}},
+				el('summary', {}, 'Хранение данных'),
+				el('p', {class: 'ia-muted'}, 'Примеры сроков: 30d — 30 дней, 12h — 12 часов. Просроченные записи удаляются при ежедневной очистке.'),
+				form);
+			return panel;
+		}
 
 		async loadInfo() {
 			try {

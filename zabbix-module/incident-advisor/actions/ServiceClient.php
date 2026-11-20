@@ -22,6 +22,13 @@ class ServiceClient {
 			'X-Advisor-Token: '.$config['service_token'],
 			'X-Advisor-User: '.(CWebUser::$data['username'] ?? '')
 		];
+		if ($path === '/api/settings/retention' && CWebUser::getType() >= USER_TYPE_ZABBIX_ADMIN) {
+			$token = getenv('INCIDENT_ADVISOR_RETENTION_TOKEN')
+				?: trim((string) @file_get_contents('/advisor-admin/token'));
+			if ($token !== '') {
+				$headers[] = 'X-Advisor-Retention-Token: '.$token;
+			}
+		}
 		curl_setopt_array($ch, [
 			CURLOPT_CUSTOMREQUEST => $method,
 			CURLOPT_RETURNTRANSFER => true,
