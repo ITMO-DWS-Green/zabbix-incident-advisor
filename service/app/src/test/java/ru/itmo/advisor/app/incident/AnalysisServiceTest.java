@@ -1,15 +1,17 @@
 package ru.itmo.advisor.app.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.START;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.context;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.incident;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
@@ -18,16 +20,14 @@ import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
 import ru.itmo.advisor.app.config.AdvisorProperties;
+import ru.itmo.advisor.domain.fixtures.CascadeFixture;
+import ru.itmo.advisor.domain.fixtures.IncidentFixtures;
 import ru.itmo.advisor.domain.model.AnalysisStatus;
-import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentContext;
-import ru.itmo.advisor.domain.model.IncidentStatus;
-import ru.itmo.advisor.domain.model.LogSeries;
+import ru.itmo.advisor.domain.model.MetricDeviation;
 import ru.itmo.advisor.domain.model.MetricSeries;
-import ru.itmo.advisor.domain.model.MonitoredItem;
 import ru.itmo.advisor.domain.model.ServiceGraph;
-import ru.itmo.advisor.domain.model.Tag;
 import ru.itmo.advisor.domain.model.TimeWindow;
 import ru.itmo.advisor.domain.port.ServiceGraphProvider;
 import ru.itmo.advisor.domain.port.ZabbixWriter;
@@ -39,16 +39,12 @@ import ru.itmo.advisor.llm.StubLlmClient;
  */
 class AnalysisServiceTest {
 
-    private static final Instant START = Instant.parse("2026-10-29T12:00:00Z");
-
     private final InMemoryIncidentRepository incidents = new InMemoryIncidentRepository();
     private final List<String> comments = new ArrayList<>();
 
     @Test
     void cascadeFromDatabaseIsTracedToDatabaseAndCommentedInZabbix() {
-        Incident incident = new Incident(UUID.randomUUID(), 42, "gateway: доля 5xx выше 10%", 3,
-                List.of(new HostRef("gateway", "gateway")), List.of(), START, null,
-                IncidentStatus.OPEN, AnalysisStatus.PENDING, null, null);
+        Incident incident = incident(42, "gateway", "gateway: доля 5xx выше 10%", START);
         incidents.createIfAbsent(incident);
 
         service(new FakeSource()).analyze(incident.id());
@@ -57,15 +53,16 @@ class AnalysisServiceTest {
         assertThat(analyzed.analysisStatus()).isEqualTo(AnalysisStatus.DONE);
         assertThat(analyzed.analysis().topSuspect()).isEqualTo("database");
         assertThat(analyzed.analysis().scope()).contains("gateway", "orders", "database");
+        assertThat(analyzed.analysis().deviations()).extracting(MetricDeviation::host)
+                .containsExactly("database", "orders", "gateway");
+        assertThat(analyzed.analysis().deviations().get(0).startedAt()).isEqualTo(CascadeFixture.FAULT_START);
         assertThat(comments).singleElement().asString()
                 .startsWith(AnalysisService.COMMENT_PREFIX).contains("database");
     }
 
     @Test
     void analysisCarriesAtLeastTwoCharacteristicLogLinesOfTheSourceAndNoInfoNoise() {
-        Incident incident = new Incident(UUID.randomUUID(), 44, "gateway: доля 5xx выше 10%", 3,
-                List.of(new HostRef("gateway", "gateway")), List.of(), START, null,
-                IncidentStatus.OPEN, AnalysisStatus.PENDING, null, null);
+        Incident incident = incident(44, "gateway", "gateway: доля 5xx выше 10%", START);
         incidents.createIfAbsent(incident);
 
         service(new FakeSource()).analyze(incident.id());
@@ -80,8 +77,7 @@ class AnalysisServiceTest {
 
     @Test
     void failureIsStoredAndDoesNotThrow() {
-        Incident incident = new Incident(UUID.randomUUID(), 43, "x", 3, List.of(new HostRef("gateway", "gateway")),
-                List.of(), START, null, IncidentStatus.OPEN, AnalysisStatus.PENDING, null, null);
+        Incident incident = incident(43, "gateway", "x", START);
         incidents.createIfAbsent(incident);
 
         service(new FakeSource() {
@@ -124,51 +120,21 @@ class AnalysisServiceTest {
 
         @Override
         public List<ServiceGraphProvider.HostInfo> hosts() {
-            return List.of(
-                    new ServiceGraphProvider.HostInfo("gateway", "gateway", List.of(new Tag("depends_on", "orders")), List.of()),
-                    new ServiceGraphProvider.HostInfo("orders", "orders", List.of(new Tag("depends_on", "database")), List.of()),
-                    new ServiceGraphProvider.HostInfo("database", "database", List.of(), List.of()));
+            return CascadeFixture.HOSTS;
         }
 
         @Override
         public IncidentContext load(Incident incident, ServiceGraph graph, Instant now) {
-            List<String> scope = List.copyOf(graph.neighbourhood("gateway", 2));
-            return new IncidentContext(incident, new TimeWindow(START.minus(Duration.ofMinutes(15)), now), graph, scope,
-                    List.of(series("database", "Средняя задержка", 50, 4000, START.minusSeconds(240)),
-                            series("orders", "Доля 5xx", 0.01, 0.6, START.minusSeconds(150)),
-                            series("gateway", "Доля 5xx", 0.01, 0.6, START.minusSeconds(60))),
-                    List.of(logs("database"), logs("orders")));
+            var scope = new LinkedHashSet<String>();
+            incident.hostNames().forEach(host -> scope.addAll(graph.neighbourhood(host, 2)));
+            var window = new TimeWindow(IncidentFixtures.WINDOW.from(), now);
+            return context(incident, window, graph, List.copyOf(scope),
+                    metrics(window).stream().filter(series -> scope.contains(series.item().host())).toList(),
+                    CascadeFixture.logs(window).stream().filter(series -> scope.contains(series.item().host())).toList());
         }
 
-        /** Спокойные INFO весь lookback; ошибки database — с начала сбоя, за 4 минуты до проблемы gateway. */
-        private static LogSeries logs(String host) {
-            List<LogSeries.Line> lines = new ArrayList<>();
-            int n = 0;
-            for (Instant t = START.minus(Duration.ofMinutes(15)); t.isBefore(START.plusSeconds(120)); t = t.plusSeconds(10)) {
-                lines.add(line(t, "INFO", host, "r.i.t.shop.OrderController", "Order " + (++n) + " read ok"));
-                if (!t.isBefore(START.minusSeconds(240)) && host.equals("database")) {
-                    String reason = n % 2 == 0 ? "Deadlock detected while updating order status"
-                            : "Pool exhausted: timeout waiting for connection";
-                    lines.add(line(t, "ERROR", host, "r.i.t.chaos.ChaosFilter",
-                            "Unhandled exception while processing GET /api/orders/" + n + ": " + reason));
-                }
-            }
-            return new LogSeries(new MonitoredItem(host + "-log", host, "Лог сервиса", "log[" + host + ".log]", 2, "",
-                    List.of(new Tag("component", "logs"))), lines);
-        }
-
-        private static LogSeries.Line line(Instant t, String level, String host, String logger, String message) {
-            return new LogSeries.Line(t, "%s %-5s [%s] [] %s - %s".formatted(
-                    t.toString().replace('T', ' ').replace("Z", ""), level, host, logger, message), null, null);
-        }
-
-        private static MetricSeries series(String host, String name, double normal, double bad, Instant breakAt) {
-            List<MetricSeries.Point> points = new ArrayList<>();
-            for (Instant t = START.minus(Duration.ofMinutes(15)); t.isBefore(START.plusSeconds(120)); t = t.plusSeconds(10)) {
-                double noise = Math.sin(t.getEpochSecond()) * normal * 0.02;
-                points.add(new MetricSeries.Point(t, (t.isBefore(breakAt) ? normal : bad) + noise));
-            }
-            return new MetricSeries(new MonitoredItem(host + "-1", host, name, "k", 0, "", List.of()), points);
+        List<MetricSeries> metrics(TimeWindow window) {
+            return CascadeFixture.metrics(window);
         }
     }
 }
