@@ -47,7 +47,7 @@ flowchart LR
 | incident-advisor: значения | 0 — значения | тег элемента `advisor` существует | `/zabbix/connector/values` |
 
 - Авторизация — Bearer (`authtype: 5`), токен `ADVISOR_CONNECTOR_TOKEN`.
-- Сервис должен ответить 200–204, иначе Zabbix повторяет отправку (`max_attempts` до 5), потом данные теряются — догоняем через API ([#41](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/41)).
+- Сервис должен ответить 200–204, иначе Zabbix повторяет отправку (`max_attempts` до 5), потом данные теряются — `CatchUpService` сверяет `problem.get` с базой и через `event.get` достаёт хосты, теги и закрытие. Не восстанавливается сбой, который целиком начался и закончился за простой дольше окна `recent` у `problem.get`.
 
 Событие о проблеме:
 ```json
