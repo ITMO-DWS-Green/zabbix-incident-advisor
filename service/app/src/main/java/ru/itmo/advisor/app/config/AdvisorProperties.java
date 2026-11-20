@@ -13,7 +13,7 @@ public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analy
         security = security == null ? new Security(null, null) : security;
         analysis = analysis == null ? new Analysis(null, null, null, null, null, null) : analysis;
         llm = llm == null ? new Llm(null, null, null, null, null) : llm;
-        incident = incident == null ? new Incident(null) : incident;
+        incident = incident == null ? new Incident(null, null) : incident;
         retention = retention == null ? new Retention(null, null) : retention;
     }
 
@@ -69,10 +69,13 @@ public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analy
     /**
      * @param mergeWindow проблемы на связанных по карте сервисах, начавшиеся не дальше этого от начала инцидента,
      *                    попадают в один инцидент; {@code 0} — не объединять
+     * @param catchUpInterval как часто сверять открытые проблемы Zabbix с базой, чтобы догнать события,
+     *                        которые коннектор не доставил; {@code 0} — не догонять
      */
-    public record Incident(Duration mergeWindow) {
+    public record Incident(Duration mergeWindow, Duration catchUpInterval) {
         public Incident {
             mergeWindow = mergeWindow == null ? Duration.ofSeconds(60) : mergeWindow;
+            catchUpInterval = catchUpInterval == null ? Duration.ofMinutes(5) : catchUpInterval;
         }
     }
 
