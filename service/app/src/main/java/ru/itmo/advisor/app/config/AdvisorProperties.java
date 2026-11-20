@@ -5,7 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Настройки из application.yml, префикс {@code advisor}. Переменные окружения: ADVISOR_ANALYSIS_DELAY и т. п. */
 @ConfigurationProperties("advisor")
-public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analysis, Llm llm, Incident incident) {
+public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analysis, Llm llm, Incident incident,
+                                Retention retention) {
 
     public AdvisorProperties {
         zabbix = zabbix == null ? new Zabbix(null, null, null, null) : zabbix;
@@ -13,6 +14,7 @@ public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analy
         analysis = analysis == null ? new Analysis(null, null, null, null, null, null) : analysis;
         llm = llm == null ? new Llm(null, null, null, null, null) : llm;
         incident = incident == null ? new Incident(null) : incident;
+        retention = retention == null ? new Retention(null, null) : retention;
     }
 
     /**
@@ -71,6 +73,16 @@ public record AdvisorProperties(Zabbix zabbix, Security security, Analysis analy
     public record Incident(Duration mergeWindow) {
         public Incident {
             mergeWindow = mergeWindow == null ? Duration.ofSeconds(60) : mergeWindow;
+        }
+    }
+
+    public record Retention(Duration incidents, Duration llmAudit) {
+        public Retention {
+            incidents = incidents == null ? Duration.ofDays(90) : incidents;
+            llmAudit = llmAudit == null ? Duration.ofDays(90) : llmAudit;
+            if (incidents.isNegative() || incidents.isZero() || llmAudit.isNegative() || llmAudit.isZero()) {
+                throw new IllegalArgumentException("Сроки хранения инцидентов и журнала LLM должны быть положительными");
+            }
         }
     }
 
