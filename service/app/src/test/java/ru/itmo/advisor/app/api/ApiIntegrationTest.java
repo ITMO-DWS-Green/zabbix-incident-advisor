@@ -16,16 +16,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import ru.itmo.advisor.app.incident.AnalysisScheduler;
 import ru.itmo.advisor.app.storage.RetentionCleanup;
 
 /** Сквозь HTTP и настоящую PostgreSQL: коннектор → инцидент → API интерфейса. Zabbix не нужен. */
 @SpringBootTest(properties = {
-    "advisor.analysis.delay=1h",          // разбор в тесте не запускаем — для него нужен Zabbix
     "advisor.zabbix.token=test",
     "advisor.security.ui-token=ui",
     "advisor.security.connector-token=conn",
@@ -52,6 +53,9 @@ class ApiIntegrationTest {
 
     @Autowired
     RetentionCleanup retentionCleanup;
+
+    @MockitoBean
+    AnalysisScheduler scheduler;  // HTTP и PostgreSQL проверяем без запуска разбора, которому нужен Zabbix
 
     @Test
     @Transactional

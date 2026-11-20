@@ -267,7 +267,7 @@
 						info.zabbixVersion ? `Zabbix API ${info.zabbixVersion}` : `Zabbix недоступен: ${info.zabbixError || ''}`),
 					el('span', {class: 'ia-info-item'}, el('span', {class: 'ia-dot ia-dot-' + (info.llmEnabled ? 'ok' : 'muted')}),
 						info.llmEnabled ? `LLM: ${info.llmModel}` : 'LLM выключена — объяснение по шаблону'),
-					el('span', {class: 'ia-info-item ia-muted'}, `разбор через ${info.analysisDelaySeconds} с после начала`));
+					el('span', {class: 'ia-info-item ia-muted'}, `старт разбора через ${info.analysisDelaySeconds} с после события`));
 			} catch (e) {
 				this.info.replaceChildren(el('span', {class: 'ia-info-item'}, el('span', {class: 'ia-dot ia-dot-bad'}),
 					'Сервис недоступен: ' + e.message));
@@ -492,7 +492,7 @@
 						el('div', {class: 'ia-verdict-text'}, a.explanation ? a.explanation.summary : 'Объяснения нет.'),
 						el('div', {class: 'ia-verdict-meta'},
 							a.explanation && a.explanation.generatedBy ? 'написал: ' + a.explanation.generatedBy + ' · ' : '',
-							'разобран ', ago(a.analyzedAt),
+							a.completedAt ? ['разобран ', ago(a.completedAt)] : ['начат ', ago(a.analyzedAt)],
 							a.scope && a.scope.length ? ` · в разборе: ${a.scope.join(', ')}` : '')),
 					d.analysisStatus === 'FAILED' && d.analysisError
 						? el('div', {class: 'ia-alert ia-alert-bad'}, 'Повторный разбор не удался: ' + d.analysisError) : null,

@@ -1,16 +1,18 @@
 package ru.itmo.advisor.app.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import ru.itmo.advisor.analysis.evaluation.TimeOverlapEvaluator;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
 import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
@@ -19,6 +21,7 @@ import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
 import ru.itmo.advisor.app.config.AdvisorProperties;
 import ru.itmo.advisor.domain.model.AnalysisStatus;
+import ru.itmo.advisor.domain.model.FaultLabel;
 import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentContext;
@@ -55,6 +58,12 @@ class AnalysisServiceTest {
         Incident analyzed = incidents.find(incident.id()).orElseThrow();
         assertThat(analyzed.analysisStatus()).isEqualTo(AnalysisStatus.DONE);
         assertThat(analyzed.analysis().topSuspect()).isEqualTo("database");
+        assertThat(analyzed.analysis().analyzedAt()).isEqualTo(START.plusSeconds(120));
+        assertThat(analyzed.analysis().completedAt()).isEqualTo(START.plusSeconds(127));
+        var fault = new FaultLabel("cascade", "fault-1", "LATENCY_SPIKE", "database",
+                START.minusSeconds(20), START.plusSeconds(120));
+        var report = new TimeOverlapEvaluator().evaluate(List.of(fault), List.of(analyzed));
+        assertThat(report.meanTimeToAnswer()).isEqualTo(Duration.ofSeconds(147));
         assertThat(analyzed.analysis().scope()).contains("gateway", "orders", "database");
         assertThat(comments).singleElement().asString()
                 .startsWith(AnalysisService.COMMENT_PREFIX).contains("database");
@@ -95,10 +104,12 @@ class AnalysisServiceTest {
 
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
+        Clock clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(START.plusSeconds(120), START.plusSeconds(127));
         return new AnalysisService(incidents, source, new TagServiceGraphProvider(), new BaselineDeviationDetector(),
                 new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer,
-                new AdvisorProperties(null, null, null, null, null, null), Clock.fixed(START.plusSeconds(120), ZoneOffset.UTC));
+                new AdvisorProperties(null, null, null, null, null, null), clock);
     }
 
     /** gateway → orders → database; задержка database выросла раньше, чем ошибки у остальных. */

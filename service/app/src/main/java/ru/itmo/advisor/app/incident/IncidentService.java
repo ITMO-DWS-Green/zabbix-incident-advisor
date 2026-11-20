@@ -63,7 +63,7 @@ public class IncidentService {
         }
         incidents.createIfAbsent(Incident.open(UUID.randomUUID(), problem)).ifPresent(created -> {
             LOG.info("Новый инцидент {}: {} на {}", created.id(), created.triggerName(), created.hostNames());
-            scheduler.scheduleDefault(created.id());
+            scheduler.scheduleDefault(created.id(), problem.startedAt());
         });
     }
 }

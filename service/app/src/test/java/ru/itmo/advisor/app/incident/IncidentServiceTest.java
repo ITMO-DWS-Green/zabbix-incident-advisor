@@ -160,9 +160,9 @@ class IncidentServiceTest {
 
     private IncidentService service(Duration mergeWindow) {
         AnalysisService analysis = analysis();
-        AnalysisScheduler scheduler = new AnalysisScheduler(analysis, incidents, props()) {
+        AnalysisScheduler scheduler = new AnalysisScheduler(analysis, incidents, props(), Clock.fixed(T0, ZoneOffset.UTC)) {
             @Override
-            public void scheduleDefault(UUID incidentId) {
+            public void scheduleDefault(UUID incidentId, Instant eventTime) {
                 scheduled.add(incidentId);
             }
         };

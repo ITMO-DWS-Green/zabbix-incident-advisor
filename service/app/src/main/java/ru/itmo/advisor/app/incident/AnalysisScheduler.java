@@ -1,6 +1,8 @@
 package ru.itmo.advisor.app.incident;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -24,12 +26,14 @@ public class AnalysisScheduler implements DisposableBean {
     private final AnalysisService analysis;
     private final IncidentRepository incidents;
     private final Duration delay;
+    private final Clock clock;
     private final ScheduledExecutorService executor;
 
-    public AnalysisScheduler(AnalysisService analysis, IncidentRepository incidents, AdvisorProperties props) {
+    public AnalysisScheduler(AnalysisService analysis, IncidentRepository incidents, AdvisorProperties props, Clock clock) {
         this.analysis = analysis;
         this.incidents = incidents;
         this.delay = props.analysis().delay();
+        this.clock = clock;
         this.executor = Executors.newScheduledThreadPool(props.analysis().threads(), r -> {
             Thread t = new Thread(r, "analysis");
             t.setDaemon(true);
@@ -37,8 +41,9 @@ public class AnalysisScheduler implements DisposableBean {
         });
     }
 
-    public void scheduleDefault(UUID incidentId) {
-        schedule(incidentId, delay);
+    public void scheduleDefault(UUID incidentId, Instant eventTime) {
+        Duration remaining = Duration.between(clock.instant(), eventTime.plus(delay));
+        schedule(incidentId, remaining.isNegative() ? Duration.ZERO : remaining);
     }
 
     public void schedule(UUID incidentId, Duration after) {
@@ -50,7 +55,7 @@ public class AnalysisScheduler implements DisposableBean {
     public void resumePending() {
         var pending = new java.util.ArrayList<>(incidents.findByAnalysisStatus(AnalysisStatus.PENDING));
         pending.addAll(incidents.findByAnalysisStatus(AnalysisStatus.RUNNING));
-        pending.forEach(i -> schedule(i.id(), Duration.ofSeconds(5)));
+        pending.forEach(i -> scheduleDefault(i.id(), i.startedAt()));
         if (!pending.isEmpty()) {
             LOG.info("Возобновлено разборов после перезапуска: {}", pending.size());
         }

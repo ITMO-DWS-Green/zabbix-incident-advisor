@@ -10,7 +10,7 @@ import java.util.List;
  * @param matched        сколько из них совпали по времени хотя бы с одним инцидентом
  * @param sourceCorrect  у скольких первым подозреваемым назван настоящий источник
  * @param sourceInTop3   у скольких настоящий источник в первых трёх
- * @param meanTimeToAnswer среднее время от начала сбоя до готового разбора
+ * @param meanTimeToAnswer среднее время от начала сбоя до готового разбора среди записей с временем завершения
  */
 public record EvaluationReport(int faults, int matched, int sourceCorrect, int sourceInTop3,
                                Duration meanTimeToAnswer, List<Row> rows) {

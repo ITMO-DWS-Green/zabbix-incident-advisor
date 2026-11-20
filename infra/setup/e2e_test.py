@@ -8,12 +8,14 @@ import os
 import sys
 import time
 import urllib.request
+from datetime import datetime
 
 ZABBIX = os.environ.get("ZABBIX_URL", "http://localhost:8070")
 ADVISOR = os.environ.get("ADVISOR_URL", "http://localhost:8095")
 STAND = os.environ.get("STAND_URL", "http://localhost:8090")
 UI_TOKEN = os.environ.get("ADVISOR_UI_TOKEN", "dev-ui-token")
 FAULT_SECONDS = 150
+ANSWER_LIMIT_SECONDS = 180
 PREFIX = "[incident-advisor]"
 
 
@@ -28,6 +30,10 @@ def http(method, url, body=None, headers=None):
 
 def advisor(path):
     return http("GET", ADVISOR + path, headers={"X-Advisor-Token": UI_TOKEN})
+
+
+def timestamp(iso_date):
+    return datetime.fromisoformat(iso_date.replace("Z", "+00:00")).timestamp()
 
 
 def zabbix(method, params, token=None):
@@ -88,18 +94,29 @@ def main():
     wait("страница модуля и прокси в сервис работают", check_module_page, 120)
     wait("стенд отвечает", lambda: http("GET", STAND + "/chaos/status")["stats"]["requests"] > 0, 300)
 
+    scenario_id = f"ci-e2e-{time.time_ns()}"
     started = time.time()
     http("POST", STAND + "/chaos/scenario?target=database",
-         {"type": "ERRORS_5XX", "rate": 1.0, "durationSeconds": FAULT_SECONDS, "scenarioId": "ci-e2e"})
+         {"type": "ERRORS_5XX", "rate": 1.0, "durationSeconds": FAULT_SECONDS, "scenarioId": scenario_id})
     print("Включён сбой: database отвечает 500 на все запросы")
 
     def analyzed():
         done = [i for i in advisor("/api/incidents") if i["analysisStatus"] == "DONE"
-                and i["startedAt"] and "5xx" in i["triggerName"]]
+                and i["startedAt"] and timestamp(i["startedAt"]) >= int(started)
+                and "5xx" in i["triggerName"]]
         return done[0] if done else None
 
     incident = wait("инцидент разобран", analyzed, 480)
+    details = advisor(f"/api/incidents/{incident['id']}")
+    event_at = timestamp(incident["startedAt"])
+    analysis_at = timestamp(details["analysis"]["analyzedAt"])
+    completed_at = timestamp(details["analysis"]["completedAt"])
+    elapsed = completed_at - event_at
+    assert analysis_at <= completed_at and 0 <= elapsed <= ANSWER_LIMIT_SECONDS, (
+        f"от события до готового разбора {elapsed:.1f} с, лимит {ANSWER_LIMIT_SECONDS} с"
+    )
     print(f"  {incident['triggerName']}: источник {incident['topSuspect']}; {incident['summary']}")
+    print(f"  от события до готового разбора: {elapsed:.1f} с; вычисление: {completed_at - analysis_at:.1f} с")
 
     def cascade_merged():
         problems = advisor(f"/api/incidents/{incident['id']}")["problems"]
@@ -109,7 +126,8 @@ def main():
     problems = wait("каскад от database — один инцидент из проблем нескольких сервисов", cascade_merged, 120)
     print(f"  проблемы инцидента: {[p['triggerName'] for p in problems]}")
     others = [i["triggerName"] for i in advisor("/api/incidents")
-              if i["id"] != incident["id"] and "5xx" in i["triggerName"]]
+              if i["id"] != incident["id"] and i["startedAt"] and timestamp(i["startedAt"]) >= int(started)
+              and "5xx" in i["triggerName"]]
     if others:
         sys.exit(f"каскад разбит на несколько инцидентов: лишние {others}")
 
@@ -118,9 +136,11 @@ def main():
     def commented():
         events = zabbix("event.get", {"eventids": [str(incident["problemEventId"])],
                                       "select_acknowledges": "extend"}, token)
-        return any(PREFIX in a["message"] for e in events for a in e["acknowledges"])
+        return min((int(a["clock"]) for e in events for a in e["acknowledges"]
+                    if a["message"].startswith(PREFIX)), default=None)
 
-    wait("разбор записан комментарием к проблеме в Zabbix", commented, 120)
+    comment_at = wait("разбор записан комментарием к проблеме в Zabbix", commented, 120)
+    print(f"  от события до комментария по часам Zabbix: {comment_at - event_at:.1f} с")
 
     def logs_arrived():
         # источник сбоя пишет исключение 5xx, вызывающие — «downstream … responded»
@@ -135,7 +155,8 @@ def main():
     if remaining > 0:
         time.sleep(remaining)
     report = wait("разметка сбоя пришла и учтена в отчёте",
-                  lambda: (r := advisor("/api/evaluation?scenarioId=ci-e2e"))["faults"] >= 1 and r, 180)
+                  lambda: (r := advisor(f"/api/evaluation?scenarioId={scenario_id}"))["matched"] >= 1
+                  and r["meanTimeToAnswer"] is not None and r, 180)
     print(f"  отчёт: {report}")
     print("ВСЯ ЦЕПОЧКА РАБОТАЕТ")
 

@@ -51,9 +51,9 @@ public class TimeOverlapEvaluator implements QualityEvaluator {
             if (rank >= 0 && rank < 3) {
                 top3++;
             }
-            Instant analyzedAt = incident.analysis().analyzedAt();
-            if (analyzedAt != null) {
-                answerMillis += Duration.between(label.start(), analyzedAt).toMillis();
+            Instant completedAt = incident.analysis().completedAt();
+            if (completedAt != null) {
+                answerMillis += Duration.between(label.start(), completedAt).toMillis();
                 answered++;
             }
             rows.add(new EvaluationReport.Row(label.faultId(), label.type(), label.source(),
