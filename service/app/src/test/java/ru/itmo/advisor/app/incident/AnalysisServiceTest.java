@@ -13,7 +13,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
-import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
+import ru.itmo.advisor.analysis.logs.PatternLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
@@ -23,6 +23,7 @@ import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentContext;
 import ru.itmo.advisor.domain.model.IncidentStatus;
+import ru.itmo.advisor.domain.model.LogSeries;
 import ru.itmo.advisor.domain.model.MetricSeries;
 import ru.itmo.advisor.domain.model.MonitoredItem;
 import ru.itmo.advisor.domain.model.ServiceGraph;
@@ -61,6 +62,23 @@ class AnalysisServiceTest {
     }
 
     @Test
+    void analysisCarriesAtLeastTwoCharacteristicLogLinesOfTheSourceAndNoInfoNoise() {
+        Incident incident = new Incident(UUID.randomUUID(), 44, "gateway: доля 5xx выше 10%", 3,
+                List.of(new HostRef("gateway", "gateway")), List.of(), START, null,
+                IncidentStatus.OPEN, AnalysisStatus.PENDING, null, null);
+        incidents.createIfAbsent(incident);
+
+        service(new FakeSource()).analyze(incident.id());
+
+        var evidence = incidents.find(incident.id()).orElseThrow().analysis().logEvidence();
+        assertThat(evidence).filteredOn(e -> e.host().equals("database")).hasSizeGreaterThanOrEqualTo(2)
+                .allSatisfy(e -> assertThat(e.example()).contains(" ERROR ").contains("Unhandled exception"));
+        assertThat(evidence).noneMatch(e -> e.example().contains(" INFO "));
+        assertThat(incidents.find(incident.id()).orElseThrow().analysis().explanation().details())
+                .contains("Логи:").contains("Deadlock detected");
+    }
+
+    @Test
     void failureIsStoredAndDoesNotThrow() {
         Incident incident = new Incident(UUID.randomUUID(), 43, "x", 3, List.of(new HostRef("gateway", "gateway")),
                 List.of(), START, null, IncidentStatus.OPEN, AnalysisStatus.PENDING, null, null);
@@ -96,7 +114,7 @@ class AnalysisServiceTest {
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
         return new AnalysisService(incidents, source, new TagServiceGraphProvider(), new BaselineDeviationDetector(),
-                new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
+                new PatternLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer,
                 new AdvisorProperties(null, null, null, null, null, null), Clock.fixed(START.plusSeconds(120), ZoneOffset.UTC));
     }
@@ -119,7 +137,29 @@ class AnalysisServiceTest {
                     List.of(series("database", "Средняя задержка", 50, 4000, START.minusSeconds(240)),
                             series("orders", "Доля 5xx", 0.01, 0.6, START.minusSeconds(150)),
                             series("gateway", "Доля 5xx", 0.01, 0.6, START.minusSeconds(60))),
-                    List.of());
+                    List.of(logs("database"), logs("orders")));
+        }
+
+        /** Спокойные INFO весь lookback; ошибки database — с начала сбоя, за 4 минуты до проблемы gateway. */
+        private static LogSeries logs(String host) {
+            List<LogSeries.Line> lines = new ArrayList<>();
+            int n = 0;
+            for (Instant t = START.minus(Duration.ofMinutes(15)); t.isBefore(START.plusSeconds(120)); t = t.plusSeconds(10)) {
+                lines.add(line(t, "INFO", host, "r.i.t.shop.OrderController", "Order " + (++n) + " read ok"));
+                if (!t.isBefore(START.minusSeconds(240)) && host.equals("database")) {
+                    String reason = n % 2 == 0 ? "Deadlock detected while updating order status"
+                            : "Pool exhausted: timeout waiting for connection";
+                    lines.add(line(t, "ERROR", host, "r.i.t.chaos.ChaosFilter",
+                            "Unhandled exception while processing GET /api/orders/" + n + ": " + reason));
+                }
+            }
+            return new LogSeries(new MonitoredItem(host + "-log", host, "Лог сервиса", "log[" + host + ".log]", 2, "",
+                    List.of(new Tag("component", "logs"))), lines);
+        }
+
+        private static LogSeries.Line line(Instant t, String level, String host, String logger, String message) {
+            return new LogSeries.Line(t, "%s %-5s [%s] [] %s - %s".formatted(
+                    t.toString().replace('T', ' ').replace("Z", ""), level, host, logger, message), null, null);
         }
 
         private static MetricSeries series(String host, String name, double normal, double bad, Instant breakAt) {
