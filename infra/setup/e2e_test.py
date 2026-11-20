@@ -129,13 +129,11 @@ def main():
     def notified():
         """Действие Zabbix по тегу team шлёт комментарий-разбор в чат команды источника, а не во все чаты."""
         try:
-            lines = http("GET", TELEGRAM + "/messages")
+            with urllib.request.urlopen(TELEGRAM + "/messages", timeout=20) as resp:
+                lines = resp.read().decode()
         except Exception:  # noqa: BLE001 — заглушка ещё не получила сообщение
             return None
-        if isinstance(lines, str):
-            messages = [json.loads(l) for l in lines.splitlines() if l.strip()]
-        else:
-            messages = []
+        messages = [json.loads(l) for l in lines.splitlines() if l.strip()]
         hits = [m for m in messages if PREFIX in m.get("body", {}).get("text", "")]
         return hits if hits else None
 
