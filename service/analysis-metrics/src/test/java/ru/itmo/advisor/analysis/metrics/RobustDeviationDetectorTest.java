@@ -127,6 +127,20 @@ class RobustDeviationDetectorTest {
         assertThat(detector.detect(context(points, trends(false).subList(0, 2)))).hasSize(1);
     }
 
+    @Test
+    void ordinaryCounterGrowthIsNotAFaultButAStepOnTheRampIs() {
+        List<MetricSeries.Point> points = new ArrayList<>();
+        for (int i = 0; i < 12; i++) points.add(new MetricSeries.Point(SPLIT.minusSeconds(120 - i * 10), 100 + i * 10));
+        // One historical spike must not change the estimated rate.
+        points.set(3, new MetricSeries.Point(points.get(3).time(), 10000));
+        add(points, SPLIT, 220, 230, 240, 250, 260, 270);
+        assertThat(detect(points)).isEmpty();
+        add(points, SPLIT.plusSeconds(60), 600, 610, 620);
+        var deviation = detect(points).getFirst();
+        assertThat(deviation.startedAt()).isEqualTo(SPLIT.plusSeconds(60));
+        assertThat(deviation.expected()).isCloseTo(280, within(1e-9));
+    }
+
     private List<MetricDeviation> detect(List<MetricSeries.Point> points) {
         return detector.detect(context(points, List.of()));
     }

@@ -36,11 +36,11 @@ public final class RobustDeviationDetector implements MetricDeviationDetector {
             if (baseline.size() < MIN_BASELINE) {
                 continue;
             }
-            Stats raw = stats(baseline.stream().map(MetricSeries.Point::value).toList());
+            Baseline raw = baseline(baseline);
             Seasonal seasonal = new Seasonal(series.trends(), split);
-            List<Double> residuals = baseline.stream().filter(p -> seasonal.at(p.time()) != null)
-                    .map(p -> p.value() - seasonal.at(p.time()).center()).toList();
-            Stats residual = residuals.size() >= MIN_BASELINE ? stats(residuals) : null;
+            List<MetricSeries.Point> residuals = baseline.stream().filter(p -> seasonal.at(p.time()) != null)
+                    .map(p -> new MetricSeries.Point(p.time(), p.value() - seasonal.at(p.time()).center())).toList();
+            Baseline residual = residuals.size() >= MIN_BASELINE ? baseline(residuals) : null;
             double maxGap = 3 * cadence(baseline);
             MetricSeries.Point first = null, previous = null;
             int count = 0, direction = 0;
@@ -50,7 +50,7 @@ public final class RobustDeviationDetector implements MetricDeviationDetector {
                     continue;
                 }
                 Stats slot = residual == null ? null : seasonal.at(point.time());
-                double expected = slot == null ? raw.center() : slot.center() + residual.center();
+                double expected = slot == null ? raw.expected(point.time()) : slot.center() + residual.expected(point.time());
                 double spread = slot == null ? raw.spread() : Math.max(residual.spread(), slot.spread());
                 double scale = Math.max(spread, Math.max(Math.abs(expected) * 0.05, 1e-9));
                 double z = (point.value() - expected) / scale;
@@ -83,6 +83,37 @@ public final class RobustDeviationDetector implements MetricDeviationDetector {
         result.sort(Comparator.comparing(MetricDeviation::startedAt)
                 .thenComparing(MetricDeviation::host).thenComparing(MetricDeviation::itemId));
         return result;
+    }
+
+    /** Bounded Theil–Sen slope: a few historical outliers do not turn a ramp into a fault. */
+    private static Baseline baseline(List<MetricSeries.Point> points) {
+        Instant anchor = points.get(points.size() / 2).time();
+        List<MetricSeries.Point> sample = new ArrayList<>();
+        int count = Math.min(32, points.size());
+        for (int i = 0; i < count; i++) sample.add(points.get(i * (points.size() - 1) / (count - 1)));
+        List<Double> slopes = new ArrayList<>();
+        for (int i = 0; i < sample.size(); i++) {
+            for (int j = i + 1; j < sample.size(); j++) {
+                double seconds = seconds(sample.get(i).time(), sample.get(j).time());
+                double slope = (sample.get(j).value() - sample.get(i).value()) / seconds;
+                if (seconds > 0 && Double.isFinite(slope)) slopes.add(slope);
+            }
+        }
+        double slope = slopes.isEmpty() ? 0 : median(slopes);
+        List<Double> adjusted = points.stream().map(p -> p.value() - slope * seconds(anchor, p.time())).toList();
+        if (adjusted.stream().anyMatch(v -> !Double.isFinite(v))) {
+            return new Baseline(anchor, stats(points.stream().map(MetricSeries.Point::value).toList()), 0);
+        }
+        return new Baseline(anchor, stats(adjusted), slope);
+    }
+
+    private static double seconds(Instant from, Instant to) {
+        return Duration.between(from, to).toNanos() / 1e9;
+    }
+
+    private record Baseline(Instant anchor, Stats residual, double slope) {
+        double expected(Instant time) { return residual.center() + slope * seconds(anchor, time); }
+        double spread() { return residual.spread(); }
     }
 
     private static double cadence(List<MetricSeries.Point> points) {
