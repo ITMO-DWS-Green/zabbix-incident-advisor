@@ -6,8 +6,8 @@ import ru.itmo.advisor.analysis.evaluation.TimeOverlapEvaluator;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
 import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
-import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
-import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
+import ru.itmo.advisor.analysis.metrics.RobustDeviationDetector;
+import ru.itmo.advisor.analysis.ranking.GraphEvidenceRanker;
 import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
 import ru.itmo.advisor.analysis.stream.NoopValueStreamProcessor;
@@ -37,7 +37,7 @@ public class BusinessLogicConfig {
 
     @Bean
     MetricDeviationDetector metricDeviationDetector() {
-        return new BaselineDeviationDetector();
+        return new RobustDeviationDetector();
     }
 
     @Bean
@@ -47,7 +47,7 @@ public class BusinessLogicConfig {
 
     @Bean
     SuspectRanker suspectRanker() {
-        return new EarliestDeviationRanker();
+        return new GraphEvidenceRanker();
     }
 
     @Bean

@@ -45,9 +45,9 @@ flowchart LR
 | Интерфейс | Что делает | Модуль | Сейчас | Требования | Задачи |
 |---|---|---|---|---|---|
 | `ServiceGraphProvider` | Карта связей по хостам Zabbix | `analysis-graph` | тег `depends_on` | FR-03 | [#14](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/14) |
-| `MetricDeviationDetector` | Отклонения метрик и момент их начала | `analysis-metrics` | три сигмы — образец | FR-05, FR-06 | [#8](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/8) |
+| `MetricDeviationDetector` | Отклонения метрик и момент их начала | `analysis-metrics` | медиана/MAD, устойчивое начало, часовая/недельная сезонность | FR-05, FR-06 | [#8](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/8) |
 | `LogEvidenceExtractor` | Характерные строки логов | `analysis-logs` | заглушка | FR-06 | [#10](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/10) |
-| `SuspectRanker` | Ранжированный список подозреваемых | `analysis-ranking` | кто отклонился раньше — образец | FR-05 | [#9](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/9) |
+| `SuspectRanker` | Ранжированный список подозреваемых | `analysis-ranking` | время, сила, граф зависимостей и доказательства из логов | FR-05 | [#9](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/9) |
 | `CauseSymptomPolicy` | Какую проблему считать причиной текущей | `analysis-ranking` | заглушка | FR-15 | [#16](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/16) |
 | `IncidentMergePolicy` | В какой открытый инцидент добавить новую проблему | `analysis-ranking` | связь по карте + окно от начала инцидента | — | [#40](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/40) |
 | `ExplanationWriter` | Объяснение для комментария и карточки | `analysis-explain` | шаблон, при LLM — пересказ | FR-07, FR-14 | [#11](https://github.com/ITMO-DWS-Green/zabbix-incident-advisor/issues/11) |

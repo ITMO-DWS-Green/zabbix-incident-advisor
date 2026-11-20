@@ -14,8 +14,8 @@ import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
 import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
-import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
-import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
+import ru.itmo.advisor.analysis.metrics.RobustDeviationDetector;
+import ru.itmo.advisor.analysis.ranking.GraphEvidenceRanker;
 import ru.itmo.advisor.analysis.ranking.NoCauseSymptomPolicy;
 import ru.itmo.advisor.app.config.AdvisorProperties;
 import ru.itmo.advisor.domain.model.AnalysisStatus;
@@ -55,6 +55,10 @@ class AnalysisServiceTest {
         Incident analyzed = incidents.find(incident.id()).orElseThrow();
         assertThat(analyzed.analysisStatus()).isEqualTo(AnalysisStatus.DONE);
         assertThat(analyzed.analysis().topSuspect()).isEqualTo("database");
+        assertThat(analyzed.analysis().deviations()).filteredOn(d -> d.host().equals("database"))
+                .singleElement().satisfies(d -> assertThat(d.startedAt()).isEqualTo(START.minusSeconds(240)));
+        assertThat(analyzed.analysis().suspects().getFirst().reasons())
+                .anyMatch(r -> r.contains("gateway, orders"));
         assertThat(analyzed.analysis().scope()).contains("gateway", "orders", "database");
         assertThat(comments).singleElement().asString()
                 .startsWith(AnalysisService.COMMENT_PREFIX).contains("database");
@@ -95,8 +99,8 @@ class AnalysisServiceTest {
 
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
-        return new AnalysisService(incidents, source, new TagServiceGraphProvider(), new BaselineDeviationDetector(),
-                new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
+        return new AnalysisService(incidents, source, new TagServiceGraphProvider(), new RobustDeviationDetector(),
+                new NoLogEvidenceExtractor(), new GraphEvidenceRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer,
                 new AdvisorProperties(null, null, null, null, null, null), Clock.fixed(START.plusSeconds(120), ZoneOffset.UTC));
     }
