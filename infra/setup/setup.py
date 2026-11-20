@@ -6,6 +6,8 @@
 4. Модуль интерфейса incident-advisor зарегистрирован и включён.
 5. Хосты стенда test-server с тегом depends_on (карта связей), метриками, триггерами и лог-элементом
    (агент читает файл, который пишет сервис).
+6. Оповещение о разборе в Telegram (FR-08): тег team у хостов, тип оповещения, пользователь на команду
+   и действие, которое при комментарии к проблеме шлёт разбор в чат ответственной команды.
 
 Повторный запуск безопасен: существующее не дублируется, токен пересоздаётся.
 """
@@ -26,6 +28,11 @@ TOKEN_FILE = os.environ.get("TOKEN_FILE", "/secrets/zabbix-api-token")
 RETENTION_TOKEN_FILE = os.environ.get("RETENTION_TOKEN_FILE")
 STAND_URL = os.environ.get("STAND_URL_PATTERN", "http://{service}:8080")
 STAND_LOG_DIR = os.environ.get("STAND_LOG_DIR", "/var/log/stand")  # общий том сервисов стенда и zabbix-agent2
+# Оповещение в Telegram (FR-08). Токен бота в репозитории не хранится — только в окружении.
+# Без токена стенд поднимается как раньше, тип оповещения создаётся выключенным.
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_API_URL = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org/bot")  # на стенде — заглушка
+WEBHOOK_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_webhook.js")
 
 # Стенд test-server: кто кого вызывает (совпадает с compose.yaml репозитория test-server).
 STAND = {
@@ -35,12 +42,29 @@ STAND = {
     "database": [],
 }
 
+# Справочник «сервис — команда» (D-006): тег team у хоста. Одной команде — один групповой чат.
+TEAMS = {
+    "gateway": "platform",
+    "orders": "orders",
+    "payments": "payments",
+    "database": "data",
+}
+
 HTTP_AGENT, DEPENDENT, ZABBIX_ACTIVE = 19, 18, 7
 FLOAT, CHAR, LOG, TEXT = 0, 1, 2, 4
 JSONPATH, JAVASCRIPT = 12, 21
 BEARER = 5
 EVENTS, ITEM_VALUES = 1, 0
 TAG_EXISTS = 12
+MEDIA_TYPE_WEBHOOK = 4
+EVENT_SOURCE_TRIGGERS = 0
+CONDITION_TYPE_EVENT_TAG = 25
+CONDITION_TYPE_EVENT_TAG_VALUE = 26
+CONDITION_OPERATOR_EQUAL = 0
+# Условие «значение тега события»: имя тега — в value2, значение — в value (иначе API вернёт ошибку).
+EVENT_TAG_NAME = "team"
+OPERATION_TYPE_MESSAGE = 0
+PERM_READ = 2
 
 token = None
 request_id = 0
@@ -138,10 +162,12 @@ def ensure_log_item(hostid, service):
 def create_stand_host(service, deps, groupid):
     existing = call("host.get", {"filter": {"host": [service]}, "output": ["hostid"]})
     if existing:
-        ensure_log_item(existing[0]["hostid"], service)
+        hostid = existing[0]["hostid"]
+        ensure_log_item(hostid, service)
+        ensure_team_tag(hostid, service)
         print(f"Хост {service} уже есть")
         return
-    tags = [{"tag": "stand", "value": "test-server"}]
+    tags = [{"tag": "stand", "value": "test-server"}, {"tag": "team", "value": TEAMS[service]}]
     if deps:
         tags.append({"tag": "depends_on", "value": ",".join(deps)})
     hostid = call("host.create", {"host": service, "groups": [{"groupid": groupid}], "tags": tags})["hostids"][0]
@@ -181,6 +207,127 @@ def create_stand_host(service, deps, groupid):
     print(f"Хост {service} → {base}, зависит от: {', '.join(deps) or '—'}")
 
 
+def ensure_team_tag(hostid, service):
+    """Тег team нужен и на хостах, созданных прошлым запуском setup, — иначе оповещение не найдёт команду."""
+    tags = call("host.get", {"hostids": [hostid], "selectTags": "extend"})[0]["tags"]
+    if any(t["tag"] == "team" for t in tags):
+        return
+    call("host.update", {"hostid": hostid, "tags": tags + [{"tag": "team", "value": TEAMS[service]}]})
+    print(f"Хост {service}: добавлен тег team={TEAMS[service]}")
+
+
+def telegram_parameters():
+    return [
+        {"name": "api_token", "value": TELEGRAM_TOKEN or "<не задан TELEGRAM_BOT_TOKEN>"},
+        {"name": "api_chat_id", "value": "{ALERT.SENDTO}"},
+        {"name": "api_url", "value": TELEGRAM_API_URL},
+        {"name": "alert_subject", "value": "{ALERT.SUBJECT}"},
+        {"name": "alert_message", "value": "{ALERT.MESSAGE}"},
+        {"name": "api_parse_mode", "value": ""},
+    ]
+
+
+def ensure_telegram_mediatype():
+    """Тип оповещения — вебхук. Токен берётся из окружения и в репозиторий не попадает; без него тип выключен.
+
+    Повторный запуск не только включает тип, но и обновляет токен, адрес и скрипт: иначе тип,
+    созданный без токена, навсегда остаётся с заглушкой «<не задан …>», и отправка падает.
+    """
+    with open(WEBHOOK_SCRIPT, encoding="utf-8") as fh:
+        script = fh.read()
+    found = call("mediatype.get", {"filter": {"name": ["Telegram"]}, "output": ["mediatypeid"]})
+    if found:
+        call("mediatype.update", {"mediatypeid": found[0]["mediatypeid"], "status": 0 if TELEGRAM_TOKEN else 1,
+                                  "script": script, "parameters": telegram_parameters()})
+        state = "обновлён и включён" if TELEGRAM_TOKEN else "обновлён, оставлен выключенным — нет токена"
+        print(f"Тип оповещения Telegram уже был — {state}")
+        return found[0]["mediatypeid"]
+    mediatypeid = call("mediatype.create", {
+        "name": "Telegram", "type": MEDIA_TYPE_WEBHOOK, "status": 0 if TELEGRAM_TOKEN else 1,
+        "script": script, "timeout": "10s", "process_tags": 0,
+        "parameters": telegram_parameters(),
+    })["mediatypeids"][0]
+    state = "включён" if TELEGRAM_TOKEN else "создан выключенным — нет TELEGRAM_BOT_TOKEN"
+    print(f"Тип оповещения Telegram {state}")
+    return mediatypeid
+
+
+def parse_chat_ids():
+    """TELEGRAM_CHAT_IDS='platform:-1001,orders:-1002' — id группового чата на команду. Незаданные → отрицательные id-заглушки."""
+    raw = os.environ.get("TELEGRAM_CHAT_IDS", "")
+    chats = {}
+    for pair in filter(None, (p.strip() for p in raw.split(","))):
+        team, _, chat = pair.partition(":")
+        if team and chat:
+            chats[team.strip()] = chat.strip()
+    for team in sorted(set(TEAMS.values())):
+        chats.setdefault(team, str(-(10_000 + sum(ord(c) for c in team))))
+    return chats
+
+
+def ensure_team_user(team, chat_id, mediatypeid, usrgrpid, roleid):
+    """Пользователь на команду: в медиа — id её группового чата. Действие шлёт разбор именно ему."""
+    username = f"team-{team}"
+    found = call("user.get", {"filter": {"username": [username]}, "output": ["userid"]})
+    if found:
+        return found[0]["userid"]
+    userid = call("user.create", {
+        "username": username, "passwd": os.urandom(18).hex(), "roleid": roleid,
+        "usrgrps": [{"usrgrpid": usrgrpid}],
+        "medias": [{"mediatypeid": mediatypeid, "sendto": [chat_id], "active": 0,
+                    "severity": 63, "period": "1-7,00:00-24:00"}],
+    })["userids"][0]
+    print(f"Команда {team}: пользователь {username}, чат {chat_id}")
+    return userid
+
+
+def ensure_notification_action(team, userid, mediatypeid):
+    """Действие по тегу team: комментарий к проблеме (наш разбор) уходит в чат этой команды.
+
+    Оповещения о самой проблеме нет — только операция обновления, чтобы в чат попадал разбор,
+    а не голый алерт. Текст — комментарий как есть ({EVENT.UPDATE.MESSAGE}), без шаблона типа оповещения.
+    """
+    name = f"incident-advisor: разбор → {team}"
+    if call("action.get", {"filter": {"name": [name]}}):
+        print(f"Действие «{name}» уже есть")
+        return
+    call("action.create", {
+        "name": name, "eventsource": EVENT_SOURCE_TRIGGERS, "status": 0,
+        "pause_suppressed": 0, "notify_if_canceled": 1,
+        "filter": {"evaltype": 0, "conditions": [
+            {"conditiontype": CONDITION_TYPE_EVENT_TAG, "operator": CONDITION_OPERATOR_EQUAL, "value": EVENT_TAG_NAME},
+            {"conditiontype": CONDITION_TYPE_EVENT_TAG_VALUE, "operator": CONDITION_OPERATOR_EQUAL,
+             "value": team, "value2": EVENT_TAG_NAME},
+        ]},
+        "update_operations": [{
+            "operationtype": OPERATION_TYPE_MESSAGE,
+            "opmessage_usr": [{"userid": userid}],
+            "opmessage": {"default_msg": 0, "mediatypeid": mediatypeid,
+                          "subject": "{EVENT.NAME}", "message": "{EVENT.UPDATE.MESSAGE}"},
+        }],
+    })
+    print(f"Действие «{name}»: комментарий к проблеме → чат команды")
+
+
+def ensure_telegram_notifications():
+    mediatypeid = ensure_telegram_mediatype()
+    roleid = call("role.get", {"filter": {"name": ["User role"]}, "output": ["roleid"]})[0]["roleid"]
+    groupid = ensure_group("test-server")
+    found = call("usergroup.get", {"filter": {"name": ["incident-advisor: команды"]}})
+    if found:
+        usrgrpid = found[0]["usrgrpid"]
+    else:
+        usrgrpid = call("usergroup.create", {
+            "name": "incident-advisor: команды",
+            "hostgroup_rights": [{"id": groupid, "permission": PERM_READ}],
+        })["usrgrpids"][0]
+        print("Группа пользователей «incident-advisor: команды» — чтение хостов стенда")
+    chats = parse_chat_ids()
+    for team in sorted(set(TEAMS.values())):
+        userid = ensure_team_user(team, chats[team], mediatypeid, usrgrpid, roleid)
+        ensure_notification_action(team, userid, mediatypeid)
+
+
 def main():
     global token
     if RETENTION_TOKEN_FILE:
@@ -197,6 +344,7 @@ def main():
     ensure_connector("incident-advisor: значения", ITEM_VALUES, "/zabbix/connector/values",
                      tags=[{"tag": "advisor", "operator": TAG_EXISTS, "value": ""}])
     ensure_module()
+    ensure_telegram_notifications()
     if os.environ.get("STAND_HOSTS", "1") == "1":
         groupid = ensure_group("test-server")
         for service, deps in STAND.items():

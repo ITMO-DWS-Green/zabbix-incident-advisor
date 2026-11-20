@@ -81,7 +81,19 @@ services:
     volumes: [stand-logs:/var/log/stand:ro]
     depends_on: [zabbix-server]
 
-  # Настройка Zabbix через API: токен сервиса, коннекторы, модуль, хосты стенда. Один раз и завершается.
+  # Заглушка Telegram Bot API: принимает то, что вебхук Zabbix шлёт вместо api.telegram.org, и пишет в файл.
+  telegram-stub:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    ports: ["8088:8080"]   # e2e-тест читает принятые сообщения с хоста
+    volumes:
+      - ./infra/setup:/setup:ro
+      - telegram-messages:/messages
+    environment:
+      TELEGRAM_STUB_FILE: /messages/messages.jsonl
+    command: ["python", "-u", "/setup/telegram_stub.py"]
+
+  # Настройка Zabbix через API: токен сервиса, коннекторы, модуль, хосты стенда, оповещение в Telegram. Один раз и завершается.
   setup:
     image: python:3.12-alpine
     restart: "no"
@@ -91,6 +103,11 @@ services:
       ADVISOR_CONNECTOR_TOKEN: ${ADVISOR_CONNECTOR_TOKEN:-dev-connector-token}
       TOKEN_FILE: /secrets/zabbix-api-token
       RETENTION_TOKEN_FILE: /advisor-admin/token
+      # Оповещение о разборе (FR-08). Токен в репозитории не хранится; без него тип оповещения создаётся выключенным.
+      # На стенде вебхук смотрит на заглушку telegram-stub, поэтому доставку разбора проверяет e2e без интернета.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-stand-stub-token}
+      TELEGRAM_API_URL: http://telegram-stub:8080/bot
+      TELEGRAM_CHAT_IDS: ${TELEGRAM_CHAT_IDS:-platform:-1001,orders:-1002,payments:-1003,data:-1004}
     volumes:
       - ./infra/setup:/setup:ro
       - secrets:/secrets
@@ -199,7 +216,7 @@ services:
     profiles: [ollama]
     image: curlimages/curl:8.13.0
     restart: "no"
-    command: ["sh", "-c", "sleep 5 && curl -sf http://ollama:11434/api/pull -d '{\"name\":\"${ADVISOR_LLM_MODEL}\"}'"]
+    command: ["sh", "-c", "sleep 5 && curl -sf http://ollama:11434/api/pull -d '{\"name\":\"${ADVISOR_LLM_MODEL:-qwen2.5:3b}\"}'"]
     depends_on: [ollama]
 
 volumes:
@@ -209,3 +226,4 @@ volumes:
   advisor-admin:
   ollama:
   stand-logs:
+  telegram-messages:

@@ -19,15 +19,49 @@ docker compose --profile stand up -d --build
 
 Чтобы проверить разбор: на панели стенда включите, например, `ERRORS_5XX` на `database`. Через минуту-две в Zabbix откроются проблемы, а в Incident advisor появятся их разборы.
 
-Без стенда — `docker compose up -d --build`. С локальной LLM:
+Без стенда — `docker compose up -d --build`.
+
+## LLM для текста разбора
+
+По умолчанию LLM выключена (`ADVISOR_LLM_PROVIDER=stub`): разбор строится шаблоном, и данные не уходят наружу.
+
+Внешняя бесплатная/условно бесплатная нейронка подключается через OpenAI-compatible API. Например, OpenRouter:
 
 ```bash
 ADVISOR_LLM_PROVIDER=openai \
-ADVISOR_LLM_MODEL=hf.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB \
+ADVISOR_LLM_BASE_URL=https://openrouter.ai/api/v1 \
+ADVISOR_LLM_MODEL=meta-llama/llama-3.2-3b-instruct:free \
+ADVISOR_LLM_API_KEY=<ключ OpenRouter> \
+docker compose --profile stand up -d --build
+```
+
+Чтобы проверить ключ без запуска стенда, локально выполните:
+
+```bash
+ADVISOR_LLM_API_KEY=<ключ OpenRouter> python3 .github/scripts/check_openrouter.py
+```
+
+В GitHub добавьте ключ в **Settings → Secrets and variables → Actions → Repository secrets** с именем `OPENROUTER_API_KEY`. После этого можно вручную запустить workflow **CI** с включённым параметром `openrouter_check`: он отправит синтетический инцидент в OpenRouter и проверит, что модель назвала `database` источником.
+
+Или Groq:
+
+```bash
+ADVISOR_LLM_PROVIDER=openai \
+ADVISOR_LLM_BASE_URL=https://api.groq.com/openai/v1 \
+ADVISOR_LLM_MODEL=llama-3.1-8b-instant \
+ADVISOR_LLM_API_KEY=<ключ Groq> \
+docker compose --profile stand up -d --build
+```
+
+Локально, без внешнего API, можно поднять Ollama:
+
+```bash
+ADVISOR_LLM_PROVIDER=openai \
+ADVISOR_LLM_MODEL=qwen2.5:3b \
 docker compose --profile stand --profile ollama up -d --build
 ```
 
-Текущий профиль `ollama` в Compose запрашивает NVIDIA GPU. Модель задавайте явно: её имя используется и сервисом, и загрузчиком Ollama. Пример настроек — [`.env.example`](../.env.example), обоснование выбора — [сравнение LLM](llm/llm-comparison.md).
+Профиль `ollama` в Compose запрашивает NVIDIA GPU. Модель задавайте явно: её имя используется и сервисом, и загрузчиком Ollama. Пример настроек — [`.env.example`](../.env.example), обоснование выбора — [сравнение LLM](llm/llm-comparison.md). Перед внешней LLM факты инцидента маскируются и журналируются в `llm_audit`, но провайдера всё равно надо включать осознанно.
 
 ## Проверки
 
