@@ -37,7 +37,7 @@ ADVISOR_LLM_MODEL=llama-3.1-8b-instant
 ADVISOR_LLM_API_KEY=<ключ Groq>
 ```
 
-Проверить OpenRouter-ключ можно без запуска стенда: `ADVISOR_LLM_API_KEY=<ключ> python3 .github/scripts/check_openrouter.py`. В GitHub Actions положите ключ в repository secret `OPENROUTER_API_KEY` и запустите workflow **OpenRouter LLM check** вручную.
+Проверить OpenRouter-ключ можно без запуска стенда: `ADVISOR_LLM_API_KEY=<ключ> python3 .github/scripts/check_openrouter.py`. В GitHub Actions положите ключ в repository secret `OPENROUTER_API_KEY` и запустите workflow **CI** с включённым параметром `openrouter_check` вручную.
 
 Локально можно использовать профиль Ollama: [инструкция запуска](getting-started.md). Значение в таблице — резервное значение Java-сервиса; [`.env.example`](../.env.example) содержит готовые примеры. Перед внешней LLM факты инцидента проходят маскирование и пишутся в журнал `llm_audit`, но это всё равно внешний сервис — включайте его осознанно.
 
