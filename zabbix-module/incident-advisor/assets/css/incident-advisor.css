@@ -166,6 +166,18 @@ html[color-scheme="dark"] #incident-advisor {
 }
 #incident-advisor .ia-banner[hidden] { display: none; }
 
+#incident-advisor .ia-retention {
+	background: var(--ia-surface);
+	border: 1px solid var(--ia-border);
+	border-radius: 8px;
+	padding: 12px 16px;
+}
+#incident-advisor .ia-retention summary { cursor: pointer; font-weight: 600; }
+#incident-advisor .ia-retention p { margin: 10px 0; }
+#incident-advisor .ia-retention-form { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+#incident-advisor .ia-retention-form label { display: grid; gap: 5px; }
+#incident-advisor .ia-retention-actions { display: flex; align-items: center; gap: 10px; align-self: end; }
+
 #incident-advisor .ia-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
 #incident-advisor .ia-stat {
 	padding: 12px 14px; background: var(--ia-surface); border: 1px solid var(--ia-border); border-radius: var(--ia-radius);

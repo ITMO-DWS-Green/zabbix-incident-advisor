@@ -64,6 +64,7 @@ services:
     ports: ["8070:8080"]
     volumes:
       - ./zabbix-module/incident-advisor:/usr/share/zabbix/modules/incident-advisor:ro
+      - advisor-admin:/advisor-admin:ro
     depends_on: [zabbix-server]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
@@ -89,9 +90,11 @@ services:
       ADVISOR_URL: http://advisor:8080
       ADVISOR_CONNECTOR_TOKEN: ${ADVISOR_CONNECTOR_TOKEN:-dev-connector-token}
       TOKEN_FILE: /secrets/zabbix-api-token
+      RETENTION_TOKEN_FILE: /advisor-admin/token
     volumes:
       - ./infra/setup:/setup:ro
       - secrets:/secrets
+      - advisor-admin:/advisor-admin
     command: ["python", "-u", "/setup/setup.py"]
     depends_on:
       zabbix-web:
@@ -123,6 +126,8 @@ services:
       ADVISOR_CONNECTOR_TOKEN: ${ADVISOR_CONNECTOR_TOKEN:-dev-connector-token}
       ADVISOR_ANALYSIS_DELAY: ${ADVISOR_ANALYSIS_DELAY:-60s}
       ADVISOR_INCIDENT_MERGE_WINDOW: ${ADVISOR_INCIDENT_MERGE_WINDOW:-60s}
+      ADVISOR_RETENTION_INCIDENTS: ${ADVISOR_RETENTION_INCIDENTS:-90d}
+      ADVISOR_RETENTION_LLM_AUDIT: ${ADVISOR_RETENTION_LLM_AUDIT:-90d}
       ADVISOR_LLM_PROVIDER: ${ADVISOR_LLM_PROVIDER:-stub}
       ADVISOR_LLM_BASE_URL: ${ADVISOR_LLM_BASE_URL:-http://ollama:11434/v1}
       ADVISOR_LLM_MODEL: ${ADVISOR_LLM_MODEL:-qwen2.5:3b}
@@ -130,6 +135,7 @@ services:
     ports: ["8095:8080"]
     volumes:
       - secrets:/secrets:ro
+      - advisor-admin:/advisor-admin:ro
     depends_on:
       advisor-db:
         condition: service_healthy
@@ -199,5 +205,6 @@ volumes:
   zabbix-db:
   advisor-db:
   secrets:
+  advisor-admin:
   ollama:
   stand-logs:

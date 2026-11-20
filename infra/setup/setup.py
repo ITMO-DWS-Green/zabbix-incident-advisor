@@ -11,6 +11,7 @@
 """
 import json
 import os
+import secrets
 import sys
 import time
 import urllib.error
@@ -22,6 +23,7 @@ PASSWORD = os.environ.get("ZABBIX_PASSWORD", "zabbix")
 ADVISOR_URL = os.environ.get("ADVISOR_URL", "http://advisor:8080").rstrip("/")
 CONNECTOR_TOKEN = os.environ.get("ADVISOR_CONNECTOR_TOKEN", "dev-connector-token")
 TOKEN_FILE = os.environ.get("TOKEN_FILE", "/secrets/zabbix-api-token")
+RETENTION_TOKEN_FILE = os.environ.get("RETENTION_TOKEN_FILE")
 STAND_URL = os.environ.get("STAND_URL_PATTERN", "http://{service}:8080")
 STAND_LOG_DIR = os.environ.get("STAND_LOG_DIR", "/var/log/stand")  # общий том сервисов стенда и zabbix-agent2
 
@@ -181,6 +183,12 @@ def create_stand_host(service, deps, groupid):
 
 def main():
     global token
+    if RETENTION_TOKEN_FILE:
+        try:
+            with open(RETENTION_TOKEN_FILE, "x", encoding="ascii") as f:
+                f.write(secrets.token_urlsafe(32))
+        except FileExistsError:
+            pass
     wait_for_api()
     token = call("user.login", {"username": USER, "password": PASSWORD})
     point_server_host_to_agent()

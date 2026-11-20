@@ -25,7 +25,7 @@ class AdvisorPropertiesTest {
     @Test
     void mergeWindowDefaultsToOneMinute() {
         assertThat(bind(Map.of()).incident().mergeWindow()).isEqualTo(Duration.ofSeconds(60));
-        assertThat(new AdvisorProperties(null, null, null, null, null).incident().mergeWindow())
+        assertThat(new AdvisorProperties(null, null, null, null, null, null).incident().mergeWindow())
                 .isEqualTo(Duration.ofSeconds(60));
     }
 
@@ -37,6 +37,6 @@ class AdvisorPropertiesTest {
         environment.getPropertySources().addLast(new MapPropertySource("yml", Map.of("advisor.incident.merge-window", "60s")));
         ConfigurationPropertySources.attach(environment);
         return Binder.get(environment).bind("advisor", AdvisorProperties.class)
-                .orElseGet(() -> new AdvisorProperties(null, null, null, null, null));
+                .orElseGet(() -> new AdvisorProperties(null, null, null, null, null, null));
     }
 }

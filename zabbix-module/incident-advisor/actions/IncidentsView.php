@@ -24,6 +24,7 @@ class IncidentsView extends CController {
 	protected function doAction(): void {
 		$response = new CControllerResponseData([
 			'csrf_token' => CCsrfTokenHelper::get('incidentadvisor.api.post'),
+			'can_manage_retention' => $this->getUserType() >= USER_TYPE_ZABBIX_ADMIN,
 			'can_write' => $this->getUserType() >= USER_TYPE_ZABBIX_USER
 		]);
 		$response->setTitle(_('Incident advisor'));
