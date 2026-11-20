@@ -32,8 +32,8 @@ jobs:
     name: Что изменилось
     runs-on: ubuntu-latest
     outputs:
-      service: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.service == 'true' }}
-      e2e: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.e2e == 'true' }}
+      service: ${{ github.event_name == 'workflow_dispatch' && !inputs.openrouter_check || steps.filter.outputs.service == 'true' }}
+      e2e: ${{ github.event_name == 'workflow_dispatch' && !inputs.openrouter_check || steps.filter.outputs.e2e == 'true' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
