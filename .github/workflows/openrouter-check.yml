@@ -1,0 +1,27 @@
+name: OpenRouter LLM check
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'OpenRouter model to test'
+        required: false
+        default: 'meta-llama/llama-3.2-3b-instruct:free'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Проверка OpenRouter на тестовом инциденте
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Проверить ключ и разбор тестового инцидента
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ADVISOR_LLM_MODEL: ${{ inputs.model }}
+        run: python3 .github/scripts/check_openrouter.py

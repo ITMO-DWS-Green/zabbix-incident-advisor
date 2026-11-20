@@ -35,6 +35,14 @@ ADVISOR_LLM_API_KEY=<ключ OpenRouter> \
 docker compose --profile stand up -d --build
 ```
 
+Чтобы проверить ключ без запуска стенда, локально выполните:
+
+```bash
+ADVISOR_LLM_API_KEY=<ключ OpenRouter> python3 .github/scripts/check_openrouter.py
+```
+
+В GitHub добавьте ключ в **Settings → Secrets and variables → Actions → Repository secrets** с именем `OPENROUTER_API_KEY`. После этого можно вручную запустить workflow **OpenRouter LLM check**: он отправит синтетический инцидент в OpenRouter и проверит, что модель назвала `database` источником.
+
 Или Groq:
 
 ```bash
