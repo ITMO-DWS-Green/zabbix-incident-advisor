@@ -131,6 +131,16 @@ def main():
 
     wait("разбор записан комментарием к проблеме в Zabbix", commented, 120)
 
+    def log_evidence():
+        evidence = advisor(f"/api/incidents/{incident['id']}")["analysis"]["logEvidence"]
+        return any(e["host"] == "database" and "Unhandled exception" in e["example"] for e in evidence) and evidence
+
+    evidence = wait("в разборе есть строка с исключением из database", log_evidence, 120)
+    noise = [e["example"] for e in evidence if " INFO " in e["example"]]
+    if noise:
+        sys.exit(f"в доказательствах из логов обычные INFO: {noise}")
+    print(f"  строк логов в разборе: {len(evidence)}")
+
     def logs_arrived():
         # источник сбоя пишет исключение 5xx, вызывающие — «downstream … responded»
         source = [l for l in log_lines(token, "database", started) if "Unhandled exception" in l]

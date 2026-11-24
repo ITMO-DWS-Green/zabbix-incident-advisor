@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import ru.itmo.advisor.analysis.evaluation.TimeOverlapEvaluator;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
-import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
+import ru.itmo.advisor.analysis.logs.PatternLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.RobustDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.GraphEvidenceRanker;
 import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
@@ -42,7 +42,7 @@ public class BusinessLogicConfig {
 
     @Bean
     LogEvidenceExtractor logEvidenceExtractor() {
-        return new NoLogEvidenceExtractor();
+        return new PatternLogEvidenceExtractor();
     }
 
     @Bean

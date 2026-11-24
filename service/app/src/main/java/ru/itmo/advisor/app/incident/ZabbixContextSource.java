@@ -98,15 +98,18 @@ public class ZabbixContextSource implements ContextSource {
         }
 
         List<LogSeries> logSeries = new ArrayList<>();
+        // По одному элементу и самые свежие: у шумного сбоя строк десятки тысяч, общий лимит на все сервисы
+        // с начала окна отдал бы только старые строки и не оставил в разборе сам сбой.
         for (ValueType type : List.of(ValueType.LOG, ValueType.TEXT, ValueType.CHAR)) {
-            List<String> ids = idsOf(logs, items, type);
-            if (ids.isEmpty()) {
-                continue;
-            }
-            groupByItem(zabbix.history(type, ids, window.from(), window.to(), cfg.historyLimit()))
-                    .forEach((itemId, records) -> logSeries.add(new LogSeries(logs.get(itemId),
+            for (String itemId : idsOf(logs, items, type)) {
+                List<HistoryRecord> records =
+                        zabbix.latestHistory(type, List.of(itemId), window.from(), window.to(), cfg.historyLimit());
+                if (!records.isEmpty()) {
+                    logSeries.add(new LogSeries(logs.get(itemId),
                             records.stream().map(r -> new LogSeries.Line(time(r), r.value(), r.severity(), r.source()))
-                                    .toList())));
+                                    .toList()));
+                }
+            }
         }
 
         return new IncidentContext(incident, window, graph, List.copyOf(scope), metrics, logSeries);

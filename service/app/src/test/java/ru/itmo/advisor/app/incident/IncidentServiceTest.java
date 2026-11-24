@@ -1,6 +1,10 @@
 package ru.itmo.advisor.app.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.START;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.host;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.sustainedChange;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -15,7 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
-import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
+import ru.itmo.advisor.analysis.logs.PatternLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
@@ -25,7 +29,9 @@ import ru.itmo.advisor.domain.model.AnalysisStatus;
 import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentStatus;
+import ru.itmo.advisor.domain.model.MetricSeries;
 import ru.itmo.advisor.domain.model.Tag;
+import ru.itmo.advisor.domain.model.TimeWindow;
 import ru.itmo.advisor.domain.model.ZabbixEvent;
 import ru.itmo.advisor.domain.port.ServiceGraphProvider;
 import ru.itmo.advisor.domain.port.ZabbixWriter;
@@ -39,7 +45,7 @@ import ru.itmo.advisor.zabbix.ZabbixApi;
  */
 class IncidentServiceTest {
 
-    private static final Instant T0 = Instant.parse("2026-10-29T12:00:00Z");
+    private static final Instant T0 = START;
 
     private final InMemoryIncidentRepository incidents = new InMemoryIncidentRepository();
     private final Map<Long, List<String>> comments = new LinkedHashMap<>();
@@ -87,6 +93,40 @@ class IncidentServiceTest {
         assertThat(all.get(0).problemEventIds()).containsExactly(201L, 202L, 203L);
         assertThat(all.get(1).problemEventIds()).containsExactly(204L);
         assertThat(scheduled).hasSize(2);
+    }
+
+    @Test
+    void overlappingFaultsInIndependentBranchesAreAnalyzedSeparately() {
+        ContextSource source = new StandSource() {
+            @Override
+            public List<ServiceGraphProvider.HostInfo> hosts() {
+                var hosts = new ArrayList<>(super.hosts());
+                hosts.add(host("billing", "ledger"));
+                hosts.add(host("ledger"));
+                return hosts;
+            }
+
+            @Override
+            List<MetricSeries> metrics(TimeWindow window) {
+                var metrics = new ArrayList<>(super.metrics(window));
+                metrics.add(sustainedChange("ledger", "Задержка", window, T0.minusSeconds(30), 50, 400));
+                return metrics;
+            }
+        };
+        AnalysisService analysis = analysis(source);
+        IncidentService service = service(Duration.ofSeconds(60), source, analysis);
+
+        service.onEvents(List.of(problem(211, "gateway", "gateway: доля 5xx", 0),
+                problem(212, "billing", "billing: таймаут", 5),
+                problem(213, "orders", "orders: доля 5xx", 10)));
+
+        assertThat(scheduled).hasSize(2).doesNotHaveDuplicates();
+        scheduled.forEach(analysis::analyze);
+
+        assertThat(incidents.findAll()).extracting(Incident::problemEventIds, Incident::analysisStatus,
+                        i -> i.analysis().topSuspect())
+                .containsExactlyInAnyOrder(tuple(List.of(211L, 213L), AnalysisStatus.DONE, "database"),
+                        tuple(List.of(212L), AnalysisStatus.DONE, "ledger"));
     }
 
     @Test
@@ -282,7 +322,11 @@ class IncidentServiceTest {
     }
 
     private IncidentService service(Duration mergeWindow) {
-        AnalysisService analysis = analysis();
+        ContextSource source = new StandSource();
+        return service(mergeWindow, source, analysis(source));
+    }
+
+    private IncidentService service(Duration mergeWindow, ContextSource source, AnalysisService analysis) {
         AnalysisScheduler scheduler = new AnalysisScheduler(analysis, incidents, props()) {
             @Override
             public void scheduleDefault(UUID incidentId) {
@@ -291,11 +335,15 @@ class IncidentServiceTest {
         };
         schedulers.add(scheduler);
         return new IncidentService(incidents, scheduler, analysis, new GraphWindowMergePolicy(mergeWindow),
-                new ServiceGraphCache(new TagServiceGraphProvider(), new StandSource(),
+                new ServiceGraphCache(new TagServiceGraphProvider(), source,
                         Clock.fixed(T0, ZoneOffset.UTC)));
     }
 
     private AnalysisService analysis() {
+        return analysis(new StandSource());
+    }
+
+    private AnalysisService analysis(ContextSource source) {
         ZabbixWriter writer = new ZabbixWriter() {
             public void push(String host, String key, Object value) { }
 
@@ -311,8 +359,8 @@ class IncidentServiceTest {
 
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
-        return new AnalysisService(incidents, new StandSource(), new TagServiceGraphProvider(),
-                new BaselineDeviationDetector(), new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
+        return new AnalysisService(incidents, source, new TagServiceGraphProvider(),
+                new BaselineDeviationDetector(), new PatternLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer, props(),
                 Clock.fixed(T0.plusSeconds(120), ZoneOffset.UTC));
     }
@@ -327,14 +375,9 @@ class IncidentServiceTest {
         public List<ServiceGraphProvider.HostInfo> hosts() {
             return List.of(
                     host("gateway", "orders"),
-                    host("orders", "payments,database"),
+                    host("orders", "payments", "database"),
                     host("payments", "database"),
-                    host("database", null));
-        }
-
-        private static ServiceGraphProvider.HostInfo host(String name, String dependsOn) {
-            return new ServiceGraphProvider.HostInfo(name, name,
-                    dependsOn == null ? List.of() : List.of(new Tag("depends_on", dependsOn)), List.of());
+                    host("database"));
         }
     }
 

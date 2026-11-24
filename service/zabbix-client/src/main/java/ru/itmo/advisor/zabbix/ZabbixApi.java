@@ -86,6 +86,21 @@ public class ZabbixApi {
 
     /** История за интервал, по возрастанию времени. В одном вызове — элементы одного типа значения. */
     public List<HistoryRecord> history(ValueType type, Collection<String> itemIds, Instant from, Instant till, int limit) {
+        return history(type, itemIds, from, till, limit, "ASC");
+    }
+
+    /**
+     * То же, но если записей больше {@code limit}, остаются самые свежие, а не самые старые; порядок — по возрастанию
+     * времени. Для логов: у шумного сбоя строк десятки тысяч, и обрезка с начала окна выбросила бы сам сбой.
+     */
+    public List<HistoryRecord> latestHistory(ValueType type, Collection<String> itemIds, Instant from, Instant till,
+                                             int limit) {
+        List<HistoryRecord> newestFirst = history(type, itemIds, from, till, limit, "DESC");
+        return newestFirst.reversed();
+    }
+
+    private List<HistoryRecord> history(ValueType type, Collection<String> itemIds, Instant from, Instant till,
+                                        int limit, String order) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("output", "extend");
         p.put("history", type.code());
@@ -93,7 +108,7 @@ public class ZabbixApi {
         p.put("time_from", from.getEpochSecond());
         p.put("time_till", till.getEpochSecond());
         p.put("sortfield", "clock");
-        p.put("sortorder", "ASC");
+        p.put("sortorder", order);
         p.put("limit", limit);
         return rpc.call("history.get", p, new TypeReference<>() { });
     }
