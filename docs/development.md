@@ -118,3 +118,5 @@ ExplanationWriter.write(...)
 Для боевого Zabbix: отдельный пользователь с правами чтения на нужные группы и записи триггеров, свой API-токен, свои секреты `ADVISOR_UI_TOKEN` и `ADVISOR_CONNECTOR_TOKEN`, адрес сервиса в `zabbix-module/incident-advisor/config.php`.
 
 Точки расширения Zabbix и API в целом — [architecture/zabbix-integration.md](architecture/zabbix-integration.md), обзор — [docs/README.md](README.md).
+
+В ранжировании старое отклонение одной метрики не исключает зависимость, которая объясняет более поздние отклонения или новые шаблоны логов того же сервиса. Проверяется время отдельных признаков; самый ранний признак остаётся в результате и объяснении.

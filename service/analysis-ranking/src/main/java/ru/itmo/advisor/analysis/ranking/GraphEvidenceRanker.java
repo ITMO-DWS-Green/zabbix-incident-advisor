@@ -32,7 +32,7 @@ public final class GraphEvidenceRanker implements SuspectRanker {
                     && Double.isFinite(d.score()) && d.score() > 0) {
                 Evidence e = evidence.computeIfAbsent(d.host(), k -> new Evidence());
                 e.metrics.add(d);
-                e.first = earlier(e.first, d.startedAt());
+                e.observeOnset(d.startedAt());
             }
         }
         for (LogEvidence log : logs) {
@@ -41,7 +41,7 @@ public final class GraphEvidenceRanker implements SuspectRanker {
                 e.logs.add(log);
                 // An existing pattern's first line does not date its increase in frequency.
                 Instant onset = log.newInWindow() ? log.firstSeen() : context.incident().startedAt();
-                e.first = earlier(e.first, onset);
+                e.observeOnset(onset);
             }
         }
         if (evidence.isEmpty()) {
@@ -66,9 +66,10 @@ public final class GraphEvidenceRanker implements SuspectRanker {
                 if (other.equals(host)) return;
                 boolean otherDepends = dependencies.get(other).contains(host);
                 boolean hostDepends = dependencies.get(host).contains(other);
-                // A cycle supplies no directional evidence.
-                if (otherDepends && !hostDepends && !e.first.isAfter(o.first.plus(CLOCK_TOLERANCE))) explained.add(other);
-                if (hostDepends && !otherDepends && !o.first.isAfter(e.first.plus(CLOCK_TOLERANCE))) causes.add(other);
+                // A cycle supplies no directional evidence. An older unrelated deviation must not
+                // veto a dependency that explains a newer metric or log onset on the same host.
+                if (otherDepends && !hostDepends && !e.first.isAfter(o.latestOnset.plus(CLOCK_TOLERANCE))) explained.add(other);
+                if (hostDepends && !otherDepends && !o.first.isAfter(e.latestOnset.plus(CLOCK_TOLERANCE))) causes.add(other);
             });
             double topology = (double) explained.size() / (explained.size() + 1);
             double score = Math.max(0, Math.min(1, 0.25 * timing + 0.20 * strength + 0.15 * logWeight
@@ -81,7 +82,7 @@ public final class GraphEvidenceRanker implements SuspectRanker {
                     .forEach(d -> reasons.add(d.metric() + ": " + number(d.expected()) + " → " + number(d.actual())
                             + " " + d.units() + "; сила отклонения " + number(d.score())));
             if (!explained.isEmpty()) reasons.add("От сервиса зависят " + String.join(", ", explained)
-                    + "; направление связей и время согласуются с распространением сбоя");
+                    + "; направление связей и время новых признаков согласуются с распространением сбоя");
             if (!causes.isEmpty()) reasons.add("Возможный симптом сбоя зависимости: " + String.join(", ", causes));
             e.logs.stream().sorted(Comparator.comparingInt(LogEvidence::count).reversed()
                             .thenComparing(LogEvidence::pattern)).limit(2)
@@ -110,6 +111,12 @@ public final class GraphEvidenceRanker implements SuspectRanker {
     private static String shortText(String text) { return text.length() > 160 ? text.substring(0, 157) + "..." : text; }
     private static final class Evidence {
         private Instant first;
+        private Instant latestOnset;
+
+        private void observeOnset(Instant onset) {
+            first = earlier(first, onset);
+            if (latestOnset == null || onset.isAfter(latestOnset)) latestOnset = onset;
+        }
         private final List<MetricDeviation> metrics = new ArrayList<>();
         private final List<LogEvidence> logs = new ArrayList<>();
     }

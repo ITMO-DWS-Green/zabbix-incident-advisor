@@ -27,6 +27,30 @@ class GraphEvidenceRankerTest {
     }
 
     @Test
+    void olderLatencyNoiseDoesNotHideTheSourceOfNewCascadeErrors() {
+        var result = ranker.rank(context(CASCADE, List.of("gateway", "orders", "database")),
+                List.of(metric("orders", -180, 4), metric("orders", 0, 1e9),
+                        metric("gateway", 0, 1e9), metric("database", 10, 1e9)),
+                List.of(log("orders", 120, true), log("gateway", 120, true), log("database", 120, true)));
+        assertThat(result.getFirst().host()).isEqualTo("database");
+        assertThat(result.getFirst().reasons()).anyMatch(r -> r.contains("gateway, orders"));
+        assertThat(result.stream().filter(s -> s.host().equals("orders")).findFirst().orElseThrow())
+                .satisfies(s -> {
+                    assertThat(s.firstDeviationAt()).isEqualTo(START.minusSeconds(180));
+                    assertThat(s.reasons()).anyMatch(r -> r.contains("симптом") && r.contains("database"));
+                });
+    }
+
+    @Test
+    void newLogOnsetCanLinkACascadeDespiteAnOlderMetricOnTheCaller() {
+        var result = ranker.rank(context(new ServiceGraph(Map.of("orders", Set.of("database"))),
+                        List.of("orders", "database")),
+                List.of(metric("orders", -180, 4), metric("database", 0, 10)),
+                List.of(log("orders", 120, true), log("database", 120, true)));
+        assertThat(result.getFirst().host()).isEqualTo("database");
+    }
+
+    @Test
     void muchLaterDependencyDoesNotExplainEarlierSymptom() {
         var result = ranker.rank(context(new ServiceGraph(Map.of("orders", Set.of("database"))),
                         List.of("orders", "database")),
