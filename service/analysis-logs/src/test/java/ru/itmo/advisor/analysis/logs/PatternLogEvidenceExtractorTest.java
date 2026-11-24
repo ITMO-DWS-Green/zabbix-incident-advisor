@@ -1,32 +1,25 @@
 package ru.itmo.advisor.analysis.logs;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.START;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.incident;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.logSeries;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.standLogLine;
 
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import ru.itmo.advisor.domain.model.HostRef;
-import ru.itmo.advisor.domain.model.Incident;
+import ru.itmo.advisor.domain.fixtures.IncidentFixtures;
 import ru.itmo.advisor.domain.model.IncidentContext;
 import ru.itmo.advisor.domain.model.LogEvidence;
 import ru.itmo.advisor.domain.model.LogSeries;
-import ru.itmo.advisor.domain.model.MonitoredItem;
-import ru.itmo.advisor.domain.model.Problem;
 import ru.itmo.advisor.domain.model.ServiceGraph;
 import ru.itmo.advisor.domain.model.TimeWindow;
 
 /** Строки — в формате файлового лога test-server: {@code дата УРОВЕНЬ [сервис] [trace] логгер - сообщение}. */
 class PatternLogEvidenceExtractorTest {
-
-    private static final Instant T0 = Instant.parse("2026-10-29T12:00:00Z");
-    private static final DateTimeFormatter STAMP =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneOffset.UTC);
 
     private final PatternLogEvidenceExtractor extractor = new PatternLogEvidenceExtractor();
 
@@ -52,7 +45,7 @@ class PatternLogEvidenceExtractorTest {
         assertThat(evidence.get(0).pattern())
                 .isEqualTo("Unhandled exception while processing GET /api/orders/<N>: Deadlock detected while updating order status");
         assertThat(evidence.get(0).count()).isEqualTo(2);
-        assertThat(evidence.get(0).firstSeen()).isEqualTo(T0.plusSeconds(5));
+        assertThat(evidence.get(0).firstSeen()).isEqualTo(START.plusSeconds(5));
         assertThat(evidence).noneMatch(e -> e.example().contains(" INFO "));
     }
 
@@ -69,7 +62,7 @@ class PatternLogEvidenceExtractorTest {
         assertThat(extractor.extract(context(database))).singleElement().satisfies(e -> {
             assertThat(e.newInWindow()).isTrue();
             assertThat(e.count()).isEqualTo(4);
-            assertThat(e.firstSeen()).isEqualTo(T0.minusSeconds(200));
+            assertThat(e.firstSeen()).isEqualTo(START.minusSeconds(200));
         });
     }
 
@@ -149,9 +142,9 @@ class PatternLogEvidenceExtractorTest {
         gateway.at(9, "ERROR", "r.i.t.shop.OrderController",
                 "Failed to read order 7: downstream orders unreachable (connect to 10.0.3.17:9090 failed at 12:00:09)");
         gateway.at(12, "ERROR", "r.i.t.shop.OrderController",
-                "Request " + UUID.randomUUID() + " rejected by node 0x7f3a9c21d0b8");
+                "Request 83f44a61-11bc-462b-a8e1-0c0637825412 rejected by node 0x7f3a9c21d0b8");
         gateway.at(15, "ERROR", "r.i.t.shop.OrderController",
-                "Request " + UUID.randomUUID() + " rejected by node 0x1a2b3c4d5e6f");
+                "Request 11793291-3cef-47ce-bf4d-de5b195db56e rejected by node 0x1a2b3c4d5e6f");
 
         List<LogEvidence> evidence = extractor.extract(context(gateway));
 
@@ -215,17 +208,10 @@ class PatternLogEvidenceExtractorTest {
     }
 
     private static IncidentContext context(Lines... hosts) {
-        Problem problem = new Problem(1, "database: доля 5xx выше 10%", 3,
-                List.of(new HostRef("database", "database")), List.of(), T0, null);
-        TimeWindow window = new TimeWindow(T0.minus(Duration.ofMinutes(15)), T0.plusSeconds(60));
-        List<String> scope = new ArrayList<>();
-        List<LogSeries> series = new ArrayList<>();
-        for (Lines h : hosts) {
-            scope.add(h.host);
-            series.add(h.series());
-        }
-        return new IncidentContext(Incident.open(UUID.randomUUID(), problem), window, new ServiceGraph(Map.of()),
-                scope, List.of(), series);
+        TimeWindow window = new TimeWindow(START.minus(Duration.ofMinutes(15)), START.plusSeconds(60));
+        return IncidentFixtures.context(incident(1, "database", "database: доля 5xx выше 10%", START),
+                window, ServiceGraph.empty(), Arrays.stream(hosts).map(h -> h.host).toList(), List.of(),
+                Arrays.stream(hosts).map(Lines::series).toList());
     }
 
     /** Строки одного сервиса; {@code {n}} в тексте подставляется порядковым номером строки. */
@@ -239,11 +225,9 @@ class PatternLogEvidenceExtractorTest {
         }
 
         void at(int secondsFromStart, String level, String logger, String message) {
-            Instant t = T0.plusSeconds(secondsFromStart);
             counter++;
-            String text = "%s %-5s [%s] [t%d] %s - %s".formatted(STAMP.format(t), level, host, counter, logger,
-                    message.replace("{n}", String.valueOf(counter)));
-            lines.add(new LogSeries.Line(t, text, null, null));
+            lines.add(standLogLine(START.plusSeconds(secondsFromStart), host, level, "t" + counter, logger,
+                    message.replace("{n}", String.valueOf(counter))));
         }
 
         void every(int fromSeconds, int stepSeconds, String level, String logger, String message) {
@@ -255,14 +239,11 @@ class PatternLogEvidenceExtractorTest {
         }
 
         void raw(int secondsFromStart, String text) {
-            lines.add(new LogSeries.Line(T0.plusSeconds(secondsFromStart), text, null, null));
+            lines.add(new LogSeries.Line(START.plusSeconds(secondsFromStart), text, null, null));
         }
 
         LogSeries series() {
-            List<LogSeries.Line> sorted = lines.stream().sorted(java.util.Comparator.comparing(LogSeries.Line::time))
-                    .toList();
-            return new LogSeries(new MonitoredItem("1" + host.length(), host, "Лог сервиса",
-                    "log[/var/log/stand/" + host + ".log,,,100]", 2, null, List.of()), sorted);
+            return logSeries(host, lines);
         }
     }
 }
