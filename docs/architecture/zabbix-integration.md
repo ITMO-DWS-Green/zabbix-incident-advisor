@@ -93,6 +93,8 @@ JSON-RPC 2.0, `POST /api_jsonrpc.php`, заголовок `Authorization: Bearer
 2. Пользователь Zabbix на каждую команду, в медиа — ID группового чата команды.
 3. Действие по тегу `team`: операция обновления проблемы (наш комментарий) отправляет сообщение с текстом комментария.
 
+Всё создаёт `infra/setup/setup.py`: тег `team` на хостах стенда по справочнику «сервис — команда», тип оповещения из `telegram_webhook.js`, пользователь на команду и действие. Токен бота — из `TELEGRAM_BOT_TOKEN`, в репозитории не хранится. На стенде вебхук смотрит на заглушку `telegram-stub` (`TELEGRAM_API_URL`), и `e2e_test.py` проверяет, что разбор пришёл в чат команды источника.
+
 ## Модуль интерфейса
 Лежит в `/usr/share/zabbix/modules/<имя>/`, включается в Administration → General → Modules или `module.create`. В `compose.yaml` папка `zabbix-module/incident-advisor` смонтирована в zabbix-web, модуль включает `setup.py`.
 
