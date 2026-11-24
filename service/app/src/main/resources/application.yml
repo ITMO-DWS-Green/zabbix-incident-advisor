@@ -33,6 +33,7 @@ advisor:
     history-limit: 20000
     threads: 2
   incident:
+    catch-up-interval: ${ADVISOR_INCIDENT_CATCH_UP_INTERVAL:5m}   # сверка с problem.get: догон пропущенных событий, 0 — выключить
     merge-window: 60s     # ADVISOR_INCIDENT_MERGE_WINDOW: окно объединения проблем в инцидент, 0 — не объединять
   retention:
     incidents: ${ADVISOR_RETENTION_INCIDENTS:90d}

@@ -92,6 +92,10 @@ def main():
     wait("страница модуля и прокси в сервис работают", check_module_page, 120)
     wait("стенд отвечает", lambda: http("GET", STAND + "/chaos/status")["stats"]["requests"] > 0, 300)
 
+    baseline_started = time.time()
+    wait("собрано шесть минут здоровой истории для детектора",
+         lambda: time.time() - baseline_started >= 360, 400)
+
     started = time.time()
     http("POST", STAND + "/chaos/scenario?target=database",
          {"type": "ERRORS_5XX", "rate": 1.0, "durationSeconds": FAULT_SECONDS, "scenarioId": "ci-e2e"})
@@ -104,6 +108,11 @@ def main():
 
     incident = wait("инцидент разобран", analyzed, 480)
     print(f"  {incident['triggerName']}: источник {incident['topSuspect']}; {incident['summary']}")
+
+    assert incident["topSuspect"] == "database", f"неверный источник каскада: {incident}"
+    detail = advisor(f"/api/incidents/{incident['id']}")
+    assert any(d["host"] == "database" for d in detail["analysis"]["deviations"]), \
+        "детектор не обнаружил отклонение database"
 
     def cascade_merged():
         problems = advisor(f"/api/incidents/{incident['id']}")["problems"]
@@ -142,6 +151,16 @@ def main():
     if str(SOURCE_TEAM_CHAT) not in {str(c) for c in chats}:
         sys.exit(f"разбор ушёл не в чат команды источника ({SOURCE_TEAM_CHAT}): {chats}")
     print(f"  разбор доставлен в чат команды data ({SOURCE_TEAM_CHAT})")
+
+    def log_evidence():
+        evidence = advisor(f"/api/incidents/{incident['id']}")["analysis"]["logEvidence"]
+        return any(e["host"] == "database" and "Unhandled exception" in e["example"] for e in evidence) and evidence
+
+    evidence = wait("в разборе есть строка с исключением из database", log_evidence, 120)
+    noise = [e["example"] for e in evidence if " INFO " in e["example"]]
+    if noise:
+        sys.exit(f"в доказательствах из логов обычные INFO: {noise}")
+    print(f"  строк логов в разборе: {len(evidence)}")
 
     def logs_arrived():
         # источник сбоя пишет исключение 5xx, вызывающие — «downstream … responded»

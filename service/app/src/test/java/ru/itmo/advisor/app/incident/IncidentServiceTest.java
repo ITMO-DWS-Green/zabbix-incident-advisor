@@ -1,6 +1,10 @@
 package ru.itmo.advisor.app.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.START;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.host;
+import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.sustainedChange;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -15,7 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.analysis.explain.TemplateExplanationWriter;
 import ru.itmo.advisor.analysis.graph.TagServiceGraphProvider;
-import ru.itmo.advisor.analysis.logs.NoLogEvidenceExtractor;
+import ru.itmo.advisor.analysis.logs.PatternLogEvidenceExtractor;
 import ru.itmo.advisor.analysis.metrics.BaselineDeviationDetector;
 import ru.itmo.advisor.analysis.ranking.EarliestDeviationRanker;
 import ru.itmo.advisor.analysis.ranking.GraphWindowMergePolicy;
@@ -25,11 +29,14 @@ import ru.itmo.advisor.domain.model.AnalysisStatus;
 import ru.itmo.advisor.domain.model.HostRef;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentStatus;
+import ru.itmo.advisor.domain.model.MetricSeries;
 import ru.itmo.advisor.domain.model.Tag;
+import ru.itmo.advisor.domain.model.TimeWindow;
 import ru.itmo.advisor.domain.model.ZabbixEvent;
 import ru.itmo.advisor.domain.port.ServiceGraphProvider;
 import ru.itmo.advisor.domain.port.ZabbixWriter;
 import ru.itmo.advisor.llm.StubLlmClient;
+import ru.itmo.advisor.zabbix.ZabbixApi;
 
 /**
  * Проблемы из коннектора → инциденты на карте стенда test-server:
@@ -38,7 +45,7 @@ import ru.itmo.advisor.llm.StubLlmClient;
  */
 class IncidentServiceTest {
 
-    private static final Instant T0 = Instant.parse("2026-10-29T12:00:00Z");
+    private static final Instant T0 = START;
 
     private final InMemoryIncidentRepository incidents = new InMemoryIncidentRepository();
     private final Map<Long, List<String>> comments = new LinkedHashMap<>();
@@ -86,6 +93,40 @@ class IncidentServiceTest {
         assertThat(all.get(0).problemEventIds()).containsExactly(201L, 202L, 203L);
         assertThat(all.get(1).problemEventIds()).containsExactly(204L);
         assertThat(scheduled).hasSize(2);
+    }
+
+    @Test
+    void overlappingFaultsInIndependentBranchesAreAnalyzedSeparately() {
+        ContextSource source = new StandSource() {
+            @Override
+            public List<ServiceGraphProvider.HostInfo> hosts() {
+                var hosts = new ArrayList<>(super.hosts());
+                hosts.add(host("billing", "ledger"));
+                hosts.add(host("ledger"));
+                return hosts;
+            }
+
+            @Override
+            List<MetricSeries> metrics(TimeWindow window) {
+                var metrics = new ArrayList<>(super.metrics(window));
+                metrics.add(sustainedChange("ledger", "Задержка", window, T0.minusSeconds(30), 50, 400));
+                return metrics;
+            }
+        };
+        AnalysisService analysis = analysis(source);
+        IncidentService service = service(Duration.ofSeconds(60), source, analysis);
+
+        service.onEvents(List.of(problem(211, "gateway", "gateway: доля 5xx", 0),
+                problem(212, "billing", "billing: таймаут", 5),
+                problem(213, "orders", "orders: доля 5xx", 10)));
+
+        assertThat(scheduled).hasSize(2).doesNotHaveDuplicates();
+        scheduled.forEach(analysis::analyze);
+
+        assertThat(incidents.findAll()).extracting(Incident::problemEventIds, Incident::analysisStatus,
+                        i -> i.analysis().topSuspect())
+                .containsExactlyInAnyOrder(tuple(List.of(211L, 213L), AnalysisStatus.DONE, "database"),
+                        tuple(List.of(212L), AnalysisStatus.DONE, "ledger"));
     }
 
     @Test
@@ -158,8 +199,134 @@ class IncidentServiceTest {
         assertThat(scheduled).hasSize(1);
     }
 
+    @Test
+    void catchUpCreatesIncidentForProblemTheConnectorNeverDelivered() {
+        FakeZabbix zabbix = new FakeZabbix();
+        zabbix.open(801, "database", "database: задержка выше 1 с", 0);
+
+        catchUp(zabbix);
+
+        assertThat(incidents.findByEventId(801)).isPresent();
+        assertThat(incidents.findOpen()).hasSize(1);
+        assertThat(scheduled).hasSize(1);
+    }
+
+    @Test
+    void repeatedCatchUpAndLateConnectorDeliveryDoNotDuplicate() {
+        FakeZabbix zabbix = new FakeZabbix();
+        zabbix.open(811, "database", "database: задержка выше 1 с", 0);
+
+        IncidentService service = catchUp(zabbix);
+        catchUp(zabbix, service);
+        service.onEvents(List.of(problem(811, "database", "database: задержка выше 1 с", 0)));
+
+        assertThat(incidents.findAll()).hasSize(1);
+        assertThat(scheduled).hasSize(1);
+    }
+
+    @Test
+    void catchUpResolvesProblemWhoseRecoveryWasMissedEvenWhenProblemGetNoLongerListsIt() {
+        IncidentService service = service(Duration.ofSeconds(60));
+        service.onEvents(List.of(problem(821, "database", "db", 0)));
+        FakeZabbix zabbix = new FakeZabbix(); // problem.get пуст: проблема давно закрыта
+        zabbix.closed(821, "database", "db", 0, 90);
+
+        catchUp(zabbix, service);
+
+        Incident incident = incidents.findByEventId(821).orElseThrow();
+        assertThat(incident.status()).isEqualTo(IncidentStatus.RESOLVED);
+        assertThat(incident.resolvedAt()).isEqualTo(T0.plusSeconds(90));
+    }
+
+    @Test
+    void catchUpCreatesAndClosesRecentlyClosedProblemMissedCompletely() {
+        FakeZabbix zabbix = new FakeZabbix();
+        zabbix.closed(831, "gateway", "gateway: доля 5xx", 0, 40);
+        zabbix.listedAsRecent(831);
+
+        catchUp(zabbix);
+
+        assertThat(incidents.findByEventId(831).orElseThrow().status()).isEqualTo(IncidentStatus.RESOLVED);
+    }
+
+    @Test
+    void catchUpKeepsOpenIncidentOpenWhileZabbixStillHasTheProblem() {
+        IncidentService service = service(Duration.ofSeconds(60));
+        service.onEvents(List.of(problem(841, "database", "db", 0)));
+        FakeZabbix zabbix = new FakeZabbix();
+        zabbix.open(841, "database", "db", 0);
+
+        catchUp(zabbix, service);
+
+        assertThat(incidents.findByEventId(841).orElseThrow().status()).isEqualTo(IncidentStatus.OPEN);
+    }
+
+    private IncidentService catchUp(FakeZabbix zabbix) {
+        IncidentService service = service(Duration.ofSeconds(60));
+        catchUp(zabbix, service);
+        return service;
+    }
+
+    private void catchUp(FakeZabbix zabbix, IncidentService service) {
+        new CatchUpService(zabbix, service, incidents, props()).catchUp();
+    }
+
+    /** Zabbix с заранее заданными проблемами; {@code r_eventid} события проблемы = id проблемы + 10 000. */
+    private static class FakeZabbix extends ZabbixApi {
+        private final Map<String, ru.itmo.advisor.zabbix.model.Event> events = new LinkedHashMap<>();
+        private final List<ru.itmo.advisor.zabbix.model.Problem> listed = new ArrayList<>();
+
+        FakeZabbix() {
+            super(null);
+        }
+
+        void open(long id, String host, String name, int atSeconds) {
+            events.put(String.valueOf(id), event(id, host, name, atSeconds, 1, "0"));
+            listed.add(listing(id, name, atSeconds, "0"));
+        }
+
+        /** Закрыта, в problem.get её нет — только в event.get. */
+        void closed(long id, String host, String name, int atSeconds, int closedAtSeconds) {
+            events.put(String.valueOf(id), event(id, host, name, atSeconds, 1, String.valueOf(id + 10_000)));
+            events.put(String.valueOf(id + 10_000), event(id + 10_000, host, name, closedAtSeconds, 0, "0"));
+        }
+
+        void listedAsRecent(long id) {
+            var e = events.get(String.valueOf(id));
+            listed.add(listing(id, e.name(), (int) (e.clock() - T0.getEpochSecond()), e.recoveryEventId()));
+        }
+
+        @Override
+        public List<ru.itmo.advisor.zabbix.model.Problem> problems(boolean recent) {
+            return listed;
+        }
+
+        @Override
+        public List<ru.itmo.advisor.zabbix.model.Event> events(java.util.Collection<String> ids) {
+            return ids.stream().map(events::get).filter(java.util.Objects::nonNull).toList();
+        }
+
+        private static ru.itmo.advisor.zabbix.model.Event event(long id, String host, String name, int atSeconds,
+                                                                 int value, String recoveryId) {
+            return new ru.itmo.advisor.zabbix.model.Event(String.valueOf(id), 0, 0, "1",
+                    T0.plusSeconds(atSeconds).getEpochSecond(), 0, value, name, 3, recoveryId, "0",
+                    List.of(new ru.itmo.advisor.zabbix.model.HostRef("1", host, host)),
+                    List.of(new ru.itmo.advisor.zabbix.model.Tag("service", host)), List.of());
+        }
+
+        private static ru.itmo.advisor.zabbix.model.Problem listing(long id, String name, int atSeconds,
+                                                                      String recoveryId) {
+            return new ru.itmo.advisor.zabbix.model.Problem(String.valueOf(id), "1",
+                    T0.plusSeconds(atSeconds).getEpochSecond(), 0, name, 3, recoveryId, "0", 0, List.of());
+        }
+    }
+
     private IncidentService service(Duration mergeWindow) {
-        AnalysisService analysis = analysis();
+        ContextSource source = new StandSource();
+        return service(mergeWindow, source, analysis(source));
+    }
+
+    private IncidentService service(Duration mergeWindow, ContextSource source, AnalysisService analysis) {
         AnalysisScheduler scheduler = new AnalysisScheduler(analysis, incidents, props()) {
             @Override
             public void scheduleDefault(UUID incidentId) {
@@ -168,11 +335,15 @@ class IncidentServiceTest {
         };
         schedulers.add(scheduler);
         return new IncidentService(incidents, scheduler, analysis, new GraphWindowMergePolicy(mergeWindow),
-                new ServiceGraphCache(new TagServiceGraphProvider(), new StandSource(),
+                new ServiceGraphCache(new TagServiceGraphProvider(), source,
                         Clock.fixed(T0, ZoneOffset.UTC)));
     }
 
     private AnalysisService analysis() {
+        return analysis(new StandSource());
+    }
+
+    private AnalysisService analysis(ContextSource source) {
         ZabbixWriter writer = new ZabbixWriter() {
             public void push(String host, String key, Object value) { }
 
@@ -188,8 +359,8 @@ class IncidentServiceTest {
 
             public void updateTrigger(String id, Map<String, Object> f) { }
         };
-        return new AnalysisService(incidents, new StandSource(), new TagServiceGraphProvider(),
-                new BaselineDeviationDetector(), new NoLogEvidenceExtractor(), new EarliestDeviationRanker(),
+        return new AnalysisService(incidents, source, new TagServiceGraphProvider(),
+                new BaselineDeviationDetector(), new PatternLogEvidenceExtractor(), new EarliestDeviationRanker(),
                 new TemplateExplanationWriter(new StubLlmClient()), new NoCauseSymptomPolicy(), writer, props(),
                 Clock.fixed(T0.plusSeconds(120), ZoneOffset.UTC));
     }
@@ -204,14 +375,9 @@ class IncidentServiceTest {
         public List<ServiceGraphProvider.HostInfo> hosts() {
             return List.of(
                     host("gateway", "orders"),
-                    host("orders", "payments,database"),
+                    host("orders", "payments", "database"),
                     host("payments", "database"),
-                    host("database", null));
-        }
-
-        private static ServiceGraphProvider.HostInfo host(String name, String dependsOn) {
-            return new ServiceGraphProvider.HostInfo(name, name,
-                    dependsOn == null ? List.of() : List.of(new Tag("depends_on", dependsOn)), List.of());
+                    host("database"));
         }
     }
 

@@ -3,6 +3,7 @@ plugins {
 }
 
 val springBootVersion = "3.5.6"
+val mvpTargetTests = providers.gradleProperty("mvpTargetTests").isPresent
 
 subprojects {
     apply(plugin = "java-library")
@@ -34,6 +35,12 @@ subprojects {
     }
 
     tasks.withType<Test>().configureEach {
-        useJUnitPlatform()
+        useJUnitPlatform {
+            if (mvpTargetTests) {
+                includeTags("mvp-target")
+            } else {
+                excludeTags("mvp-target")
+            }
+        }
     }
 }

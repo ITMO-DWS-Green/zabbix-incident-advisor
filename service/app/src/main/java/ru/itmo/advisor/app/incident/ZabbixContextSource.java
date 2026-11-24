@@ -1,6 +1,8 @@
 package ru.itmo.advisor.app.incident;
 
 import java.time.Instant;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -9,6 +11,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.itmo.advisor.app.config.AdvisorProperties;
 import ru.itmo.advisor.domain.model.Incident;
 import ru.itmo.advisor.domain.model.IncidentContext;
@@ -20,6 +24,7 @@ import ru.itmo.advisor.domain.model.Tag;
 import ru.itmo.advisor.domain.model.TimeWindow;
 import ru.itmo.advisor.domain.port.ServiceGraphProvider;
 import ru.itmo.advisor.zabbix.ZabbixApi;
+import ru.itmo.advisor.zabbix.ZabbixApiException;
 import ru.itmo.advisor.zabbix.model.Host;
 import ru.itmo.advisor.zabbix.model.HistoryRecord;
 import ru.itmo.advisor.zabbix.model.Item;
@@ -33,6 +38,8 @@ import ru.itmo.advisor.zabbix.model.ValueType;
  */
 @Component
 public class ZabbixContextSource implements ContextSource {
+
+    private static final Logger log = LoggerFactory.getLogger(ZabbixContextSource.class);
 
     private final ZabbixApi zabbix;
     private final AdvisorProperties.Analysis cfg;
@@ -77,6 +84,7 @@ public class ZabbixContextSource implements ContextSource {
             }
         }
 
+        Map<String, List<MetricSeries.HourlyTrend>> trends = trends(numeric.keySet(), incident.startedAt());
         List<MetricSeries> metrics = new ArrayList<>();
         for (ValueType type : List.of(ValueType.FLOAT, ValueType.UNSIGNED)) {
             List<String> ids = idsOf(numeric, items, type);
@@ -85,22 +93,50 @@ public class ZabbixContextSource implements ContextSource {
             }
             groupByItem(zabbix.history(type, ids, window.from(), window.to(), cfg.historyLimit()))
                     .forEach((itemId, records) -> metrics.add(new MetricSeries(numeric.get(itemId),
-                            records.stream().map(r -> new MetricSeries.Point(time(r), r.asDouble())).toList())));
+                            records.stream().map(r -> new MetricSeries.Point(time(r), r.asDouble())).toList(),
+                            trends.getOrDefault(itemId, List.of()))));
         }
 
         List<LogSeries> logSeries = new ArrayList<>();
+        // По одному элементу и самые свежие: у шумного сбоя строк десятки тысяч, общий лимит на все сервисы
+        // с начала окна отдал бы только старые строки и не оставил в разборе сам сбой.
         for (ValueType type : List.of(ValueType.LOG, ValueType.TEXT, ValueType.CHAR)) {
-            List<String> ids = idsOf(logs, items, type);
-            if (ids.isEmpty()) {
-                continue;
-            }
-            groupByItem(zabbix.history(type, ids, window.from(), window.to(), cfg.historyLimit()))
-                    .forEach((itemId, records) -> logSeries.add(new LogSeries(logs.get(itemId),
+            for (String itemId : idsOf(logs, items, type)) {
+                List<HistoryRecord> records =
+                        zabbix.latestHistory(type, List.of(itemId), window.from(), window.to(), cfg.historyLimit());
+                if (!records.isEmpty()) {
+                    logSeries.add(new LogSeries(logs.get(itemId),
                             records.stream().map(r -> new LogSeries.Line(time(r), r.value(), r.severity(), r.source()))
-                                    .toList())));
+                                    .toList()));
+                }
+            }
         }
 
         return new IncidentContext(incident, window, graph, List.copyOf(scope), metrics, logSeries);
+    }
+
+    private Map<String, List<MetricSeries.HourlyTrend>> trends(Set<String> ids, Instant startedAt) {
+        Map<String, List<MetricSeries.HourlyTrend>> result = new LinkedHashMap<>();
+        // Only fully completed hours before the same five-minute lead used by the detector.
+        Instant end = startedAt.minus(Duration.ofMinutes(5)).truncatedTo(ChronoUnit.HOURS);
+        List<String> ordered = List.copyOf(ids);
+        try {
+            // Bound each response: at most 20 items × 28 days × 24 hourly records.
+            for (int offset = 0; offset < ordered.size(); offset += 20) {
+                List<String> batch = ordered.subList(offset, Math.min(offset + 20, ordered.size()));
+                for (var t : zabbix.trends(batch, end.minus(Duration.ofDays(28)), end.minusSeconds(1))) {
+                    if (ids.contains(t.itemid())) {
+                        result.computeIfAbsent(t.itemid(), k -> new ArrayList<>()).add(new MetricSeries.HourlyTrend(
+                                Instant.ofEpochSecond(t.clock()), t.num(), t.min(), t.avg(), t.max()));
+                    }
+                }
+            }
+        } catch (ZabbixApiException ex) {
+            // Trends are optional. Raw history is still required and its errors remain fatal.
+            log.warn("Часовые тренды недоступны; анализ использует сырую историю: {}", ex.getMessage());
+            result.clear();
+        }
+        return result;
     }
 
     private List<Item> limitPerHost(List<Item> items) {
