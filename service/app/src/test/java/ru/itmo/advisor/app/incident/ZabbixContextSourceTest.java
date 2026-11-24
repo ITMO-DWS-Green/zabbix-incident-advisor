@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -21,6 +22,8 @@ import ru.itmo.advisor.domain.model.IncidentContext;
 import ru.itmo.advisor.domain.model.IncidentStatus;
 import ru.itmo.advisor.domain.model.ServiceGraph;
 import ru.itmo.advisor.zabbix.ZabbixApi;
+import ru.itmo.advisor.zabbix.ZabbixApiException;
+import ru.itmo.advisor.zabbix.model.Trend;
 import ru.itmo.advisor.zabbix.model.HistoryRecord;
 import ru.itmo.advisor.zabbix.model.Host;
 import ru.itmo.advisor.zabbix.model.Item;
@@ -52,6 +55,42 @@ class ZabbixContextSourceTest {
         assertThat(context.logsOf("database").get(0).lines())
                 .extracting(l -> l.text()).singleElement().asString().contains("Pool exhausted");
         assertThat(context.logs().get(0).item().key()).startsWith("log[");
+    }
+
+    @Test
+    void loadsOnlyCompletedHistoricalTrendHours() {
+        ZabbixApi zabbix = numericSource();
+        Instant end = Instant.parse("2026-10-30T09:00:00Z");
+        when(zabbix.trends(any(), any(), any())).thenReturn(List.of(
+                new Trend("3", end.minusSeconds(3600).getEpochSecond(), 60, 1, 2, 3)));
+        IncidentContext context = source(zabbix);
+        assertThat(context.metrics()).hasSize(1);
+        assertThat(context.metrics().getFirst().trends()).hasSize(1);
+        assertThat(context.metrics().getFirst().trends().getFirst().avg()).isEqualTo(2);
+        verify(zabbix).trends(List.of("3"), end.minusSeconds(28 * 86400), end.minusSeconds(1));
+    }
+
+    @Test
+    void unavailableTrendsDoNotDiscardRawHistory() {
+        ZabbixApi zabbix = numericSource();
+        when(zabbix.trends(any(), any(), any())).thenThrow(new ZabbixApiException("denied", -32602, null));
+        IncidentContext context = source(zabbix);
+        assertThat(context.metrics().getFirst().points()).hasSize(1);
+        assertThat(context.metrics().getFirst().trends()).isEmpty();
+    }
+
+    private static ZabbixApi numericSource() {
+        ZabbixApi zabbix = mock(ZabbixApi.class);
+        when(zabbix.hostsByName(any())).thenReturn(List.of(new Host("10", "database", "database", List.of(), List.of())));
+        when(zabbix.items(any())).thenReturn(List.of(item("3", ValueType.FLOAT, "latency", List.of())));
+        when(zabbix.history(eq(ValueType.FLOAT), any(), any(), any(), anyInt())).thenReturn(List.of(
+                new HistoryRecord("3", NOW.minusSeconds(30).getEpochSecond(), 0, "2", null, null, null, null)));
+        return zabbix;
+    }
+
+    private static IncidentContext source(ZabbixApi zabbix) {
+        return new ZabbixContextSource(zabbix, new AdvisorProperties(null, null, null, null, null, null))
+                .load(incident(), ServiceGraph.empty(), NOW);
     }
 
     private static Item item(String id, ValueType type, String key, List<Tag> tags) {

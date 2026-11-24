@@ -11,16 +11,15 @@ import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.sustainedChange;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.domain.fixtures.IncidentFixtures;
 import ru.itmo.advisor.domain.model.IncidentContext;
 import ru.itmo.advisor.domain.model.MetricSeries;
 import ru.itmo.advisor.domain.model.ServiceGraph;
 
-class BaselineDeviationDetectorTest {
+class MetricDeviationScenarioTest {
 
-    private final BaselineDeviationDetector detector = new BaselineDeviationDetector();
+    private final RobustDeviationDetector detector = new RobustDeviationDetector();
 
     @Test
     void findsStartOfSustainedDeviationOnSingleService() {
@@ -42,7 +41,6 @@ class BaselineDeviationDetectorTest {
     }
 
     @Test
-    @Tag("mvp-target")
     void ignoresAnIsolatedSpikeInNormalNoise() {
         Instant spike = START.minusSeconds(90);
         MetricSeries latency = metricSeries("database", "Задержка", WINDOW, Duration.ofSeconds(10),

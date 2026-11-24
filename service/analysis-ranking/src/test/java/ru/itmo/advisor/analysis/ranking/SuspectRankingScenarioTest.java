@@ -8,17 +8,15 @@ import static ru.itmo.advisor.domain.fixtures.IncidentFixtures.incident;
 
 import java.time.Instant;
 import java.util.List;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import ru.itmo.advisor.domain.fixtures.CascadeFixture;
 import ru.itmo.advisor.domain.model.LogEvidence;
 import ru.itmo.advisor.domain.model.MetricDeviation;
 import ru.itmo.advisor.domain.model.Suspect;
 
-class EarliestDeviationRankerTest {
+class SuspectRankingScenarioTest {
 
     @Test
-    @Tag("mvp-target")
     void ranksFaultyDependencyAboveSlightlyEarlierSymptom() {
         var context = context(incident(1, "gateway", "gateway: доля 5xx выше 10%", START), WINDOW,
                 CascadeFixture.GRAPH, List.of("gateway", "orders", "database"), List.of(), List.of());
@@ -35,7 +33,7 @@ class EarliestDeviationRankerTest {
                 new LogEvidence("orders", "orders-log", "downstream database responded 500",
                         "downstream database responded 500", 3, faultStart.plusSeconds(10), true));
 
-        List<Suspect> suspects = new EarliestDeviationRanker().rank(context, deviations, logs);
+        List<Suspect> suspects = new GraphEvidenceRanker().rank(context, deviations, logs);
 
         assertThat(suspects).first().satisfies(suspect -> {
             assertThat(suspect.host()).isEqualTo("database");
