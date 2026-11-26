@@ -1,0 +1,28 @@
+# Граничный тест — локальный запуск JUnit
+
+Проверка: ru.itmo.advisor.analysis.metrics.MetricDeviationScenarioTest#ignoresAnIsolatedSpikeInNormalNoise
+Дата: 2026-11-26 (результат сохранён около 19:36 UTC; точные времена начала и окончания не записаны).
+Исходники: git archive 5ade5a747fa356273bc8d21f9c53a58265e5eae1. После запуска 36 компилированных исходных файлов сверены по SHA-256 с архивом указанного Git-объекта: 36 совпадений, 0 расхождений. Рабочее дерево репозитория в компиляцию не включалось.
+JDK: Oracle GraalVM 21.0.8+12.1.
+Средство: собственный короткий JUnit Platform Launcher, selectMethod для указанного теста; Java-исходники компилировались javac вне рабочего дерева, без Gradle и Docker.
+Зависимости из локального Maven-кеша: JUnit Jupiter 5.12.2, JUnit Platform 1.12.2, AssertJ 3.27.3, Jackson annotations 2.18.2, OpenTest4J 1.3.0, API Guardian 1.1.2, Byte Buddy 1.15.11. Их соответствие зависимостям, разрешённым Gradle BOM проекта, не установлено.
+Ожидание: одиночный всплеск 400 на фоне шума около 50 не даёт устойчивого отклонения.
+
+Полный вывод JUnit:
+
+Test run finished after 168 ms
+[         2 containers found      ]
+[         0 containers skipped    ]
+[         2 containers started    ]
+[         0 containers aborted    ]
+[         2 containers successful ]
+[         0 containers failed     ]
+[         1 tests found           ]
+[         0 tests skipped         ]
+[         1 tests started         ]
+[         0 tests aborted         ]
+[         1 tests successful      ]
+[         0 tests failed          ]
+
+Код выхода: 0. 168 мс — длительность запуска JUnit, не время анализа инцидента и не SLA.
+Предшествующая попытка штатного Gradle wrapper не дошла до тестов: загрузка gradle-8.14.3-bin.zip завершилась java.net.SocketTimeoutException: Connect timed out. Данный JUnit-запуск не является полной Gradle-сборкой, проверкой перекрывающихся сбоев или повтором E2E.
