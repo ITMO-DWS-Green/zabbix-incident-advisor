@@ -83,7 +83,9 @@ public class AnalysisService {
             List<LogEvidence> logs = logExtractor.extract(context);
             List<Suspect> suspects = ranker.rank(context, deviations, logs);
             Explanation explanation = writer.write(context, suspects, deviations, logs);
-            result = new AnalysisResult(now, context.scope(), suspects, deviations, logs, explanation);
+            // Время готовности разбора, а не его последующей публикации в Zabbix.
+            Instant completedAt = clock.instant();
+            result = new AnalysisResult(completedAt, context.scope(), suspects, deviations, logs, explanation, completedAt);
             incidents.saveAnalysis(incidentId, result);
             LOG.info("Разобран инцидент {} ({}, проблем: {}): источник {}", incidentId, incident.triggerName(),
                     incident.problems().size(), result.topSuspect());

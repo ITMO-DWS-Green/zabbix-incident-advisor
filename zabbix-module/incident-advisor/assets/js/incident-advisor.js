@@ -135,6 +135,246 @@
 		}
 	}
 
+	// ---------- неизменяемые снимки оценки ----------
+
+	const EVALUATION_PAGE_SIZE = 50;
+	const evaluationValue = value => value === null || value === undefined || value === '' ? '—' : String(value);
+
+	function evaluationRatio(numerator, denominator) {
+		const n = Number.isFinite(numerator) ? numerator : null;
+		const d = Number.isFinite(denominator) ? denominator : null;
+		const fraction = `${evaluationValue(n)} / ${evaluationValue(d)}`;
+		if (n === null || d === null || d <= 0) return fraction + ' (недоступно)';
+		const percent = (n * 100 / d).toFixed(2).replace(/\.?0+$/, '');
+		return `${fraction} (${percent}%)`;
+	}
+
+	function evaluationDuration(value) {
+		if (value === null || value === undefined) return '—';
+		// Jackson Java Duration может быть числом секунд или строкой ISO-8601.
+		if (typeof value === 'number' && Number.isFinite(value)) return fmtNumber(value) + ' с';
+		return typeof value === 'string' ? value : '—';
+	}
+
+	function evaluationMetrics(report) {
+		return [
+			['Однозначно сопоставлено / все сбои', evaluationRatio(report.matched, report.faults)],
+			['Источник на 1-м месте / все сбои', evaluationRatio(report.sourceCorrect, report.faults)],
+			['Источник в топ-3 / все сбои', evaluationRatio(report.sourceInTop3, report.faults)],
+			['Источник на 1-м месте / сопоставленные', evaluationRatio(report.sourceCorrect, report.matched)],
+			['Источник в топ-3 / сопоставленные', evaluationRatio(report.sourceInTop3, report.matched)],
+			['Среднее время до ответа', evaluationDuration(report.meanTimeToAnswer) +
+				' · наблюдений: ' + evaluationValue(report.timeToAnswerObservations)],
+			['Baseline, верно / парные наблюдения', evaluationRatio(report.baselineCorrectCount, report.baselineObservations)],
+			['Advisor, верно / те же пары', evaluationRatio(report.pairedAdvisorCorrectCount, report.baselineObservations)],
+			['Инциденты вне окон сбоев', Array.isArray(report.outsideWindowIncidentIds)
+				? String(report.outsideWindowIncidentIds.length) : '—']
+		];
+	}
+
+	function evaluationByType(rows) {
+		const groups = new Map();
+		rows.forEach(row => {
+			const type = row.type == null || row.type === '' ? null : String(row.type);
+			if (!groups.has(type)) groups.set(type, {faults: 0, matched: 0, top1: 0, top3: 0, baseline: 0, baselineCorrect: 0, pairedCorrect: 0});
+			const group = groups.get(type);
+			group.faults++;
+			if (row.matchStatus !== 'MATCHED') return;
+			group.matched++;
+			if (row.rankOfExpected === 1) group.top1++;
+			if (Number.isInteger(row.rankOfExpected) && row.rankOfExpected > 0 && row.rankOfExpected <= 3) group.top3++;
+			if (typeof row.baselineCorrect === 'boolean') {
+				group.baseline++;
+				if (row.baselineCorrect) group.baselineCorrect++;
+				if (row.rankOfExpected === 1) group.pairedCorrect++;
+			}
+		});
+		return Array.from(groups, ([type, group]) => [evaluationValue(type), String(group.faults),
+			evaluationRatio(group.matched, group.faults), evaluationRatio(group.top1, group.faults),
+			evaluationRatio(group.top3, group.faults), evaluationRatio(group.baselineCorrect, group.baseline),
+			evaluationRatio(group.pairedCorrect, group.baseline)]);
+	}
+
+	function evaluationComposition(run) {
+		if (!Array.isArray(run.labels) || !Array.isArray(run.incidents)) return null;
+		// Сравниваем все сохранённые входы, а не только количества или id.
+		const sorted = values => values.map(value => JSON.stringify(value)).sort();
+		return JSON.stringify([sorted(run.labels), sorted(run.incidents)]);
+	}
+
+	class EvaluationPanel {
+		constructor(api) {
+			this.api = api;
+			this.offset = 0;
+			this.summaries = [];
+			this.loaded = false;
+			this.listLoading = false;
+			this.listRequest = 0;
+			this.reportRequest = 0;
+			this.selected = {A: '', B: ''};
+			this.runs = {A: null, B: null};
+			this.status = el('div', {class: 'ia-eval-status', role: 'status', 'aria-live': 'polite'});
+			this.results = el('div', {class: 'ia-eval-results'});
+			this.page = el('span', {class: 'ia-muted'});
+			this.prev = el('button', {type: 'button', class: 'ia-btn ia-btn-ghost ia-btn-sm',
+				onclick: () => this.loadPage(Math.max(0, this.offset - EVALUATION_PAGE_SIZE))}, 'Назад');
+			this.next = el('button', {type: 'button', class: 'ia-btn ia-btn-ghost ia-btn-sm',
+				onclick: () => this.loadPage(this.offset + EVALUATION_PAGE_SIZE)}, 'Далее');
+			this.refresh = el('button', {type: 'button', class: 'ia-btn ia-btn-ghost ia-btn-sm',
+				onclick: () => this.loadPage(this.offset)}, 'Обновить список');
+			this.selects = {};
+			['A', 'B'].forEach(side => {
+				this.selects[side] = el('select', {class: 'ia-field', 'aria-label': 'Снимок ' + side,
+					onchange: () => this.select(side, this.selects[side].value)});
+			});
+			this.panel = el('details', {class: 'ia-details ia-evaluation', ontoggle: () => {
+				if (this.panel.open && !this.loaded && !this.listLoading) this.loadPage(this.offset);
+			}}, el('summary', {}, 'Точность'),
+				el('div', {class: 'ia-eval-body'},
+					el('p', {class: 'ia-muted'}, 'Неизменяемые снимки входов оценщика и отчёта за окно, а не полные запуски сценариев. '
+						+ 'Создание снимков выполняется отдельно на сервере.'),
+					el('div', {class: 'ia-eval-controls'}, this.refresh, this.prev, this.next, this.page),
+					this.status,
+					el('div', {class: 'ia-eval-selects'}, ['A', 'B'].map(side =>
+						el('label', {}, 'Снимок ' + side, this.selects[side]))), this.results));
+			this.renderControls();
+		}
+
+		renderControls() {
+			this.prev.disabled = this.offset === 0;
+			this.next.disabled = this.summaries.length < EVALUATION_PAGE_SIZE;
+			this.page.textContent = `Страница ${Math.floor(this.offset / EVALUATION_PAGE_SIZE) + 1}`;
+			['A', 'B'].forEach(side => {
+				const selected = this.selected[side];
+				const options = this.summaries.slice();
+				if (selected && !options.some(item => item.id === selected)) {
+					const run = this.runs[side];
+					options.unshift(run || {id: selected});
+				}
+				this.selects[side].replaceChildren(el('option', {value: ''}, 'Не выбран'),
+					...options.map(item => el('option', {value: item.id},
+						`${evaluationValue(item.createdAt)} · ${evaluationValue(item.id)}`)));
+				this.selects[side].value = selected;
+			});
+		}
+
+		async loadPage(offset) {
+			const request = ++this.listRequest;
+			this.listLoading = true;
+			this.status.textContent = 'Загружаю список снимков…';
+			try {
+				const data = await this.api.get(`/api/evaluation/runs?limit=${EVALUATION_PAGE_SIZE}&offset=${offset}`);
+				if (request !== this.listRequest) return;
+				if (!Array.isArray(data) || data.some(item => !item || typeof item.id !== 'string')) throw new Error();
+				this.summaries = data;
+				this.offset = offset;
+				this.loaded = true;
+				this.status.textContent = data.length ? '' : 'На этой странице снимков нет.';
+				this.renderControls();
+			} catch (error) {
+				if (request === this.listRequest) this.status.textContent = 'Не удалось загрузить список снимков. Попробуйте обновить.';
+			} finally {
+				if (request === this.listRequest) this.listLoading = false;
+			}
+		}
+
+		async select(side, id) {
+			this.selected[side] = id;
+			this.runs[side] = null;
+			const request = ++this.reportRequest;
+			// При смене любого селектора загружаем обе стороны заново: старые ответы не перезапишут выбор.
+			this.renderControls();
+			this.results.replaceChildren(el('p', {class: 'ia-muted'}, id || this.selected.A || this.selected.B
+				? 'Загружаю выбранные снимки…' : 'Выберите снимок A или B.'));
+			const sides = ['A', 'B'].filter(key => this.selected[key]);
+			if (!sides.length) return;
+			const ids = sides.map(key => this.selected[key]);
+			const responses = await Promise.all(sides.map(async (key, index) => {
+				try {
+					const run = await this.api.get('/api/evaluation/runs/' + encodeURIComponent(ids[index]));
+					if (!run || run.id !== ids[index] || !run.report || typeof run.report !== 'object') throw new Error();
+					return run;
+				} catch (error) { return null; }
+			}));
+			if (request !== this.reportRequest) return;
+			sides.forEach((key, index) => { this.runs[key] = responses[index]; });
+			this.renderControls();
+			this.renderResults();
+		}
+
+		renderResults() {
+			const parts = [];
+			const a = this.runs.A, b = this.runs.B;
+			if (a && b) {
+				const fields = ['schemaVersion', 'methodologyVersion', 'scope', 'from', 'to'];
+				const different = fields.some(key => a[key] !== b[key]);
+				const ca = evaluationComposition(a), cb = evaluationComposition(b);
+				const metadataKnown = fields.every(key => a[key] !== null && a[key] !== undefined && b[key] !== null && b[key] !== undefined);
+				parts.push(el('div', {class: 'ia-eval-warning'},
+					!metadataKnown ? 'Версии, область или окна указаны не полностью. '
+						: different ? 'Версии, область или окна снимков различаются. ' : 'Версии, область и окна совпадают. ',
+					ca === null || cb === null ? 'Состав входов невозможно сравнить. '
+						: ca !== cb ? 'Состав сохранённых входов различается. ' : 'Сохранённые входы совпадают. ',
+					'Сравнение показателей не доказывает изменение качества: проверьте сопоставимость данных.'));
+				const am = evaluationMetrics(a.report), bm = evaluationMetrics(b.report);
+				parts.push(el('h3', {class: 'ia-h'}, 'Сравнение A / B'),
+					this.table(['Показатель', 'A', 'B'], am.map((row, index) => [row[0], row[1], bm[index][1]])));
+			}
+			['A', 'B'].forEach(side => {
+				if (!this.selected[side]) return;
+				const run = this.runs[side];
+				if (!run) {
+					parts.push(el('div', {class: 'ia-eval-warning'}, `Снимок ${side} не загрузился. `,
+						el('button', {type: 'button', class: 'ia-btn ia-btn-ghost ia-btn-sm',
+							onclick: () => this.select(side, this.selected[side])}, 'Повторить')));
+					return;
+				}
+				parts.push(this.runDetails(side, run));
+			});
+			this.results.replaceChildren(...parts);
+		}
+
+		table(headers, rows) {
+			return el('div', {class: 'ia-table-wrap'}, el('table', {class: 'ia-table'},
+				el('thead', {}, el('tr', {}, headers.map(header => el('th', {scope: 'col'}, header)))),
+				el('tbody', {}, rows.map(row => el('tr', {}, row.map(cell => el('td', {}, cell)))))));
+		}
+
+		runDetails(side, run) {
+			const report = run.report;
+			const statuses = {MATCHED: 'Сопоставлен', AMBIGUOUS: 'Неоднозначно', NO_INCIDENT: 'Нет инцидента', NO_ANALYSIS: 'Нет разбора'};
+			const rows = Array.isArray(report.rows) ? report.rows : [];
+			return el('section', {class: 'ia-eval-run'},
+				el('h3', {class: 'ia-h'}, 'Снимок ' + side),
+				el('p', {class: 'ia-eval-meta'}, 'ID: ', evaluationValue(run.id), ' · создан: ', evaluationValue(run.createdAt),
+					' · окно [from, to): ', evaluationValue(run.from), ' — ', evaluationValue(run.to),
+					' · схема: ', evaluationValue(run.schemaVersion), ' · методика: ', evaluationValue(run.methodologyVersion),
+					' · область: ', evaluationValue(run.scope)),
+				this.table(['Показатель', 'Значение'], evaluationMetrics(report)),
+				Array.isArray(report.outsideWindowIncidentIds) && report.outsideWindowIncidentIds.length
+					? el('details', {class: 'ia-eval-outside'}, el('summary', {}, 'ID инцидентов вне окон сбоев'),
+						el('ul', {}, report.outsideWindowIncidentIds.map(id => el('li', {}, evaluationValue(id))))) : null,
+				el('p', {class: 'ia-muted'}, 'Сопоставление по времени не доказывает причинную связь. '
+					+ 'Top-1 и top-3 считаются по первому однозначному разобранному кандидату. '
+					+ 'Baseline — хост первой проблемы выбранного инцидента; сравнение только на тех же парах с известным эталоном и baseline.'),
+				el('p', {class: 'ia-muted'}, 'Инциденты вне окон размеченных сбоев не являются доказанными ложными тревогами; '
+					+ 'интерпретация зависит от полноты разметки.'),
+				el('h4', {class: 'ia-h'}, 'По типам сбоев'),
+				rows.length ? this.table(['Тип', 'Всего сбоев', 'Сопоставлено / все', 'Top-1 / все', 'Top-3 / все',
+					'Baseline / пары', 'Advisor / те же пары'], evaluationByType(rows))
+					: el('p', {class: 'ia-muted'}, Array.isArray(report.rows) ? 'Сбоев в снимке нет.' : 'Данные по типам недоступны.'),
+				el('h4', {class: 'ia-h'}, 'По сбоям'),
+				rows.length ? this.table(['Сценарий', 'Сбой', 'Тип', 'Статус', 'Эталон', 'Прогноз', 'Ранг эталона',
+					'Инцидент', 'Кандидаты', 'Время до ответа', 'Baseline', 'Baseline верен'], rows.map(row => [
+					evaluationValue(row.scenarioId), evaluationValue(row.faultId), evaluationValue(row.type),
+					statuses[row.matchStatus] || evaluationValue(row.matchStatus), evaluationValue(row.expectedSource),
+					evaluationValue(row.predictedSource), evaluationValue(row.rankOfExpected), evaluationValue(row.incidentId),
+					Array.isArray(row.candidates) ? String(row.candidates.length) : '—', evaluationDuration(row.timeToAnswer),
+					evaluationValue(row.baselineSource), row.baselineCorrect === true ? 'Да' : row.baselineCorrect === false ? 'Нет' : '—'
+				])) : el('p', {class: 'ia-muted'}, Array.isArray(report.rows) ? 'Сбоев в снимке нет.' : 'Данные по сбоям недоступны.'));
+		}
+	}
+
 	// ---------- приложение ----------
 
 	class App {
@@ -179,6 +419,7 @@
 					el('div', {class: 'ia-header-actions'}, this.liveBtn, this.refreshBtn)),
 				this.banner,
 				root.dataset.canManageRetention === '1' ? this.retentionPanel() : document.createDocumentFragment(),
+				root.dataset.canManageRetention === '1' ? new EvaluationPanel(this.api).panel : document.createDocumentFragment(),
 				this.stats,
 				el('div', {class: 'ia-layout'},
 					el('aside', {class: 'ia-side'},

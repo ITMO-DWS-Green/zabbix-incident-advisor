@@ -71,6 +71,11 @@ class InMemoryIncidentRepository implements IncidentRepository {
     }
 
     @Override
+    public List<Incident> findByIds(List<UUID> ids) {
+        return byId.values().stream().filter(i -> ids.contains(i.id())).toList();
+    }
+
+    @Override
     public void resolve(long e, Instant at) {
         findByEventId(e).ifPresent(i -> byId.put(i.id(), i.withProblems(i.problems().stream()
                 .map(p -> p.eventId() == e && p.isOpen()

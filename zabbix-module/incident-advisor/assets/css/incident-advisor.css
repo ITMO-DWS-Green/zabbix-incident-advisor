@@ -178,6 +178,22 @@ html[color-scheme="dark"] #incident-advisor {
 #incident-advisor .ia-retention-form label { display: grid; gap: 5px; }
 #incident-advisor .ia-retention-actions { display: flex; align-items: center; gap: 10px; align-self: end; }
 
+/* ---------- снимки точности ---------- */
+#incident-advisor .ia-evaluation { background: var(--ia-surface); }
+#incident-advisor .ia-eval-body { padding: 14px; }
+#incident-advisor .ia-eval-body p { margin: 10px 0; }
+#incident-advisor .ia-eval-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#incident-advisor .ia-eval-status:not(:empty) { margin-top: 10px; }
+#incident-advisor .ia-eval-selects { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+#incident-advisor .ia-eval-selects label { display: grid; gap: 5px; min-width: 0; font-weight: 600; }
+#incident-advisor .ia-eval-selects select { min-width: 0; }
+#incident-advisor .ia-eval-warning { padding: 10px 12px; margin: 12px 0; border-radius: var(--ia-radius-sm); background: var(--ia-warn-soft); }
+#incident-advisor .ia-eval-run { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--ia-border); }
+#incident-advisor .ia-eval-meta, #incident-advisor .ia-eval-outside { overflow-wrap: anywhere; }
+#incident-advisor .ia-eval-outside { margin: 10px 0; }
+#incident-advisor .ia-eval-outside summary { cursor: pointer; }
+#incident-advisor .ia-eval-results .ia-table-wrap { border: 1px solid var(--ia-border); border-radius: var(--ia-radius-sm); }
+
 #incident-advisor .ia-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
 #incident-advisor .ia-stat {
 	padding: 12px 14px; background: var(--ia-surface); border: 1px solid var(--ia-border); border-radius: var(--ia-radius);
