@@ -35,6 +35,9 @@ public interface IncidentRepository {
 
     List<Incident> findAll();
 
+    /** Load only the specified incidents, including their problems. */
+    List<Incident> findByIds(List<UUID> ids);
+
     /** Закрыть проблему; инцидент закрывается, когда закрыты все его проблемы. */
     void resolve(long problemEventId, Instant resolvedAt);
 

@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import ru.itmo.advisor.app.storage.LabelRepository;
 import ru.itmo.advisor.app.storage.RetentionCleanup;
+import ru.itmo.advisor.domain.model.FaultLabel;
 
 /** Сквозь HTTP и настоящую PostgreSQL: коннектор → инцидент → API интерфейса. Zabbix не нужен. */
 @SpringBootTest(properties = {
@@ -52,6 +56,9 @@ class ApiIntegrationTest {
 
     @Autowired
     RetentionCleanup retentionCleanup;
+
+    @Autowired
+    LabelRepository labels;
 
     @Test
     @Transactional
@@ -205,6 +212,126 @@ class ApiIntegrationTest {
     void tokensAreRequired() throws Exception {
         mvc.perform(get("/api/incidents")).andExpect(status().isUnauthorized());
         mvc.perform(post("/zabbix/connector/events").content("{}")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @Transactional
+    void labelRetriesOnlyUpdateTheEndOfTheSameFault() throws Exception {
+        String id = "label-retry-" + UUID.randomUUID();
+        Instant start = Instant.parse("2026-10-29T12:00:00.123456789Z");
+        Instant canonicalStart = Instant.parse("2026-10-29T12:00:00.123457Z");
+        FaultLabel original = new FaultLabel("scenario-retry", id, "LATENCY", "database", start, start.plusSeconds(60));
+        postLabel(original, 202);
+        postLabel(original, 202);
+        FaultLabel updated = new FaultLabel(original.scenarioId(), id, original.type(), original.source(),
+                start, start.plusSeconds(120).plusNanos(99));
+        postLabel(updated, 202);
+        FaultLabel stored = new FaultLabel(original.scenarioId(), id, original.type(), original.source(),
+                canonicalStart, canonicalStart.plusSeconds(120));
+        assertThat(labels.find("scenario-retry")).containsExactly(stored);
+        postLabel(new FaultLabel(original.scenarioId(), id, original.type(), original.source(),
+                canonicalStart.plusNanos(1), canonicalStart.plusSeconds(120)), 202);
+        assertThat(labels.find("scenario-retry")).containsExactly(stored);
+
+        for (FaultLabel conflict : java.util.List.of(
+                new FaultLabel("different", id, original.type(), original.source(), start, start.plusSeconds(180)),
+                new FaultLabel(original.scenarioId(), id, "different", original.source(), start, start.plusSeconds(180)),
+                new FaultLabel(original.scenarioId(), id, original.type(), "different", start, start.plusSeconds(180)),
+                new FaultLabel(original.scenarioId(), id, original.type(), original.source(),
+                        start.plusNanos(1000), start.plusSeconds(180)))) {
+            postLabel(conflict, 409);
+            assertThat(labels.find("scenario-retry")).containsExactly(stored);
+        }
+        FaultLabel shortened = new FaultLabel(original.scenarioId(), id, original.type(), original.source(), start, start);
+        postLabel(shortened, 202);
+        assertThat(labels.find("scenario-retry")).containsExactly(new FaultLabel(
+                original.scenarioId(), id, original.type(), original.source(), canonicalStart, canonicalStart));
+    }
+
+    @Test
+    @Transactional
+    void nanosecondBoundsAreRoundedAcrossEpochAndSecond() throws Exception {
+        String scenario = "label-precision-" + UUID.randomUUID();
+        FaultLabel beforeEpoch = new FaultLabel(scenario, UUID.randomUUID().toString(), "type", "source",
+                Instant.parse("1969-12-31T23:59:59.999999999Z"), Instant.parse("1970-01-01T00:00:00.000000999Z"));
+        FaultLabel secondBoundary = new FaultLabel(scenario, UUID.randomUUID().toString(), "type", "source",
+                Instant.parse("2026-10-29T12:00:00.999999999Z"), Instant.parse("2026-10-29T12:00:01.000001999Z"));
+        postLabel(beforeEpoch, 202);
+        postLabel(secondBoundary, 202);
+        postLabel(beforeEpoch, 202);
+        postLabel(secondBoundary, 202);
+        assertThat(labels.find(scenario)).containsExactly(
+                new FaultLabel(scenario, beforeEpoch.faultId(), "type", "source",
+                        Instant.EPOCH, Instant.parse("1970-01-01T00:00:00.000001Z")),
+                new FaultLabel(scenario, secondBoundary.faultId(), "type", "source",
+                        Instant.parse("2026-10-29T12:00:01Z"), Instant.parse("2026-10-29T12:00:01.000002Z")));
+    }
+
+    @Test
+    @Transactional
+    void retriesLabelsWrittenByLegacyTimestampBinding() throws Exception {
+        String scenario = "legacy-label-" + UUID.randomUUID();
+        for (String[] times : java.util.List.of(
+                new String[] {"2026-10-29T12:00:00.123456499Z", "2026-10-29T12:00:00.123456Z"},
+                new String[] {"2026-10-29T12:00:00.123456500Z", "2026-10-29T12:00:00.123457Z"},
+                new String[] {"1969-12-31T23:59:59.999998499Z", "1969-12-31T23:59:59.999998Z"},
+                new String[] {"1969-12-31T23:59:59.999998500Z", "1969-12-31T23:59:59.999999Z"},
+                new String[] {"1969-12-31T23:59:59.999999500Z", "1970-01-01T00:00:00Z"},
+                new String[] {"2026-10-29T12:00:00.999999499Z", "2026-10-29T12:00:00.999999Z"},
+                new String[] {"2026-10-29T12:00:00.999999500Z", "2026-10-29T12:00:01Z"})) {
+            Instant originalStart = Instant.parse(times[0]);
+            Instant expectedStart = Instant.parse(times[1]);
+            FaultLabel legacy = new FaultLabel(scenario, UUID.randomUUID().toString(), "type", "source",
+                    originalStart, originalStart.plusSeconds(1));
+            // Reproduce the old repository: bind Timestamp.from without pre-normalization.
+            jdbc.sql("""
+                    INSERT INTO fault_label (fault_id, scenario_id, type, source, started_at, ended_at)
+                    VALUES (:id, :scenario, :type, :source, :start, :end)
+                    """).param("id", legacy.faultId()).param("scenario", scenario)
+                    .param("type", legacy.type()).param("source", legacy.source())
+                    .param("start", Timestamp.from(legacy.start())).param("end", Timestamp.from(legacy.end())).update();
+            assertThat(labels.find(scenario)).contains(new FaultLabel(scenario, legacy.faultId(), "type", "source",
+                    expectedStart, expectedStart.plusSeconds(1)));
+            FaultLabel retry = new FaultLabel(scenario, legacy.faultId(), "type", "source",
+                    originalStart, originalStart.plusSeconds(2));
+            postLabel(retry, 202);
+            assertThat(labels.find(scenario)).contains(new FaultLabel(scenario, legacy.faultId(), "type", "source",
+                    expectedStart, expectedStart.plusSeconds(2)));
+        }
+    }
+
+    @Test
+    @Transactional
+    void malformedLabelsAreRejectedWithoutWriting() throws Exception {
+        String valid = """
+                {"scenarioId":"malformed-scenario","faultId":"malformed-fault","type":"LATENCY","source":"database",
+                 "start":"2026-10-29T12:00:00Z","end":"2026-10-29T12:05:00Z"}
+                """;
+        for (String payload : java.util.List.of(
+                "{", "null", valid.replace("\"scenarioId\":\"malformed-scenario\",", ""),
+                valid.replace("\"faultId\":\"malformed-fault\"", "\"faultId\":null"),
+                valid.replace("\"type\":\"LATENCY\"", "\"type\":\" \""),
+                valid.replace("\"source\":\"database\"", "\"source\":null"),
+                valid.replace("2026-10-29T12:00:00Z", "not-a-date"),
+                valid.replace("2026-10-29T12:00:00Z", "0000-12-31T23:59:59.999999999Z"),
+                valid.replace("2026-10-29T12:05:00Z", "+10000-01-01T00:00:00Z"),
+                valid.replace("2026-10-29T12:05:00Z", "9999-12-31T23:59:59.999999500Z"),
+                valid.replace("2026-10-29T12:05:00Z", "2026-10-29T11:59:59Z"),
+                valid.replace("2026-10-29T12:00:00Z", "2026-10-29T12:00:00.000000999Z")
+                        .replace("2026-10-29T12:05:00Z", "2026-10-29T12:00:00.000000001Z"))) {
+            mvc.perform(post("/api/v1/labels").contentType(MediaType.APPLICATION_JSON).content(payload))
+                    .andExpect(status().isBadRequest());
+        }
+        assertThat(labels.find("malformed-scenario")).isEmpty();
+    }
+
+    private void postLabel(FaultLabel label, int statusCode) throws Exception {
+        var result = mvc.perform(post("/api/v1/labels").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsBytes(label)))
+                .andExpect(status().is(statusCode));
+        if (statusCode == 409) {
+            result.andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("faultId")));
+        }
     }
 
     @Test

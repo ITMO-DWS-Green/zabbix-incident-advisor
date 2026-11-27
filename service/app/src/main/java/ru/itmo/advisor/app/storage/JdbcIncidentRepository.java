@@ -122,6 +122,15 @@ public class JdbcIncidentRepository implements IncidentRepository {
     }
 
     @Override
+    public List<Incident> findByIds(List<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return withProblems(jdbc.sql("SELECT " + COLUMNS + " FROM incident WHERE id IN (:ids) ORDER BY started_at")
+                .param("ids", ids).query(this::map).list());
+    }
+
+    @Override
     @Transactional
     public void resolve(long eventId, Instant resolvedAt) {
         int updated = jdbc.sql("UPDATE incident_problem SET resolved_at = :at WHERE event_id = :e "
